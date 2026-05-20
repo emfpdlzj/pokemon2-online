@@ -97,6 +97,15 @@ player_saves
 }
 ```
 
+```json
+{
+  "type": "attack",
+  "monsterId": "mon-1",
+  "skillId": "ember",
+  "sequence": 2
+}
+```
+
 ## WebSocket 서버 패킷
 
 ```json
@@ -106,7 +115,9 @@ player_saves
     "roomId": "room-12345678",
     "serverTick": 10,
     "serverTimeMs": 1779255158123,
-    "players": []
+    "players": [],
+    "monsters": [],
+    "battles": []
   }
 }
 ```
@@ -116,8 +127,26 @@ player_saves
   "type": "move_rejected",
   "payload": {
     "sequence": 3,
-    "reason": "blocked",
-    "position": { "x": 9, "y": 9 }
+    "reason": "speed_hack_detected",
+    "serverPosition": { "x": 9, "y": 9 }
+  }
+}
+```
+
+```json
+{
+  "type": "battle_result",
+  "payload": {
+    "battleId": "battle-abc",
+    "playerId": "player-1",
+    "monsterId": "mon-1",
+    "skillId": "ember",
+    "damage": 18,
+    "monsterHp": 10,
+    "playerHp": 36,
+    "playerMp": 15,
+    "won": false,
+    "serverTick": 120
   }
 }
 ```
@@ -135,9 +164,23 @@ player_saves
 관측 지표:
 - `acceptedMoves`
 - `rejectedMoves`
-- `move_rejected.reason = blocked`
+- `move_rejected.reason = speed_hack_detected | wall_collision | tile_occupied | stale_sequence`
 
-### 2. 느린 클라이언트와 빠른 클라이언트 동기화
+### 2. 서버 권위 전투
+
+문제:
+클라이언트가 전투 결과를 직접 계산해 보내면 데미지, MP, 쿨타임, 승패를 조작할 수 있다.
+
+해결:
+클라이언트는 `attack` 입력만 보내고, `RoomActor`가 현재 전투 상태, 거리, MP, 스킬 쿨타임을 검증한 뒤 데미지와 몬스터 반격, 승패를 판정한다. 전투 종료 결과는 `battle_results` 테이블에 저장한다.
+
+관측 지표:
+- `activeBattles`
+- `completedBattles`
+- `battle_result`
+- `attack_rejected.reason = not_player_turn | out_of_range | not_enough_mp | skill_cooldown`
+
+### 3. 느린 클라이언트와 빠른 클라이언트 동기화
 
 문제:
 RTT가 다른 클라이언트는 서로 다른 시점의 위치를 보게 되고, 즉시 위치 확정을 클라이언트가 하면 보정이 어렵다.
