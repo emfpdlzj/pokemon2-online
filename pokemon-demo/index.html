@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>포켓몬 데모</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 시작 화면 -->
+  <div id="start-screen">
+    <h1>포켓몬스터2</h1>
+    <p>소프트웨어학과 박민정</p>
+    <input id="name-input" type="text" maxlength="10" placeholder="이름을 입력하세요" value="주인공">
+    <div id="main-menu">
+      <button id="single-btn" class="btn menu-btn" type="button">싱글 모드</button>
+      <button id="saves-btn" class="btn menu-btn" type="button">세이브 불러오기</button>
+      <button id="multiplayer-btn" class="btn menu-btn" type="button">멀티 모드</button>
+      <button id="settings-btn" class="btn menu-btn secondary" type="button">설정</button>
+    </div>
+    <div id="menu-status"></div>
+
+    <div id="save-menu-panel" class="menu-panel">
+      <h2>세이브 슬롯</h2>
+      <div id="save-slots"></div>
+      <button id="save-back-btn" class="btn secondary" type="button">뒤로</button>
+    </div>
+
+    <div id="multi-menu-panel" class="menu-panel">
+      <h2>멀티 방</h2>
+      <div id="room-list"></div>
+      <div class="menu-row">
+        <input id="room-name-input" type="text" maxlength="20" placeholder="방 이름" value="모험 방">
+        <button id="create-room-btn" class="btn" type="button">방 생성</button>
+      </div>
+      <button id="multi-back-btn" class="btn secondary" type="button">뒤로</button>
+    </div>
+
+    <div id="settings-panel" class="menu-panel">
+      <h2>설정</h2>
+      <label for="server-url-input">서버 주소</label>
+      <input id="server-url-input" type="text" value="http://localhost:5140">
+      <button id="save-settings-btn" class="btn" type="button">저장</button>
+      <button id="settings-back-btn" class="btn secondary" type="button">뒤로</button>
+    </div>
+  </div>
+
+  <!-- 게임 래퍼 -->
+  <div id="game-wrapper">
+
+    <!-- HUD -->
+    <div id="hud">
+      <span id="hud-map">📍 시작 마을</span>
+      <span id="hud-starter">파트너: 없음</span>
+    </div>
+
+    <!-- 캔버스 -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- 대화창 -->
+    <div id="dialogue-box">
+      <div id="dialogue-speaker"></div>
+      <div id="dialogue-text"></div>
+      <div id="dialogue-next">▼ Enter</div>
+    </div>
+
+    <!-- 선택지 -->
+    <div id="choices"></div>
+
+  </div>
+
+  <!-- 스타터 선택 오버레이 -->
+  <div id="starter-overlay">
+    <div id="starter-panel">
+      <h2>파트너를 선택하세요!</h2>
+      <div id="starter-cards"></div>
+      <p style="color:#aaa;font-size:0.8rem">카드를 클릭해서 선택</p>
+    </div>
+  </div>
+
+  <!-- 전투 화면 -->
+  <div id="battle-screen">
+    <canvas id="battle-canvas"></canvas>
+    <div id="battle-ui">
+      <div id="battle-log">전투 준비 중...</div>
+      <div id="battle-buttons">
+        <button id="b-attack" class="btn" disabled>⚔️ 공격</button>
+        <button id="b-skill"  class="btn" disabled>✨ 필살기</button>
+        <button id="b-run"    class="btn" disabled>🏃 도망</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fade-overlay" aria-hidden="true"></div>
+
+  <!-- 데이터 & 게임 스크립트 -->
+  <script src="data/maps.js"></script>
+  <script src="data/dialogues.js"></script>
+  <script src="game.js"></script>
+  <script src="battle.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,14 @@
+.DS_Store
+
+# .NET
+bin/
+obj/
+TestResults/
+*.user
+*.rsuser
+
+# Local runtime files
+*.log
+.env
+.env.*
+

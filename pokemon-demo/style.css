@@ -1,0 +1,380 @@
+/* ── 리셋 & 기본 ── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+  color: #fff;
+}
+
+/* ── 시작 화면 ── */
+#start-screen {
+  text-align: center;
+  padding: 40px;
+}
+#start-screen h1 {
+  font-size: 2.8rem;
+  color: #FFD700;
+  text-shadow: 3px 3px 0 #FF6600, 6px 6px 0 #CC0000;
+  letter-spacing: 4px;
+  margin-bottom: 12px;
+}
+#start-screen p {
+  color: #aaa;
+  margin-bottom: 30px;
+  font-size: 0.9rem;
+}
+#name-input {
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  color: #fff;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 1rem;
+  text-align: center;
+  margin-bottom: 20px;
+  width: 200px;
+  display: block;
+  margin: 0 auto 20px;
+}
+#main-menu {
+  width: min(320px, 90vw);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.btn {
+  background: #FFD700;
+  color: #1a1a2e;
+  border: none;
+  padding: 10px 28px;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: transform 0.1s;
+}
+.btn:hover { transform: scale(1.05); background: #FFA500; }
+.btn:active { transform: scale(0.97); }
+.btn.secondary {
+  background: #26324f;
+  color: #FFD700;
+  border: 2px solid #FFD700;
+}
+.btn.secondary:hover {
+  background: #32446d;
+}
+.menu-btn {
+  width: 100%;
+}
+#menu-status {
+  width: min(420px, 92vw);
+  min-height: 22px;
+  margin: 14px auto 0;
+  color: #b8e0ff;
+  font-size: 0.78rem;
+}
+.menu-panel {
+  display: none;
+  width: min(520px, 94vw);
+  margin: 18px auto 0;
+  padding: 16px;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  text-align: left;
+}
+.menu-panel h2 {
+  color: #FFD700;
+  font-size: 1rem;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.menu-panel label {
+  display: block;
+  margin-bottom: 6px;
+  color: #FFD700;
+  font-size: 0.78rem;
+}
+#save-slots,
+#room-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.slot-card,
+.room-card {
+  width: 100%;
+  padding: 10px 12px;
+  background: #15152a;
+  border: 2px solid #455070;
+  color: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.slot-card:hover,
+.room-card:hover {
+  border-color: #FFD700;
+}
+.slot-title,
+.room-title {
+  color: #FFD700;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+.slot-meta,
+.room-meta {
+  color: #b8bdd0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.menu-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#room-name-input,
+#server-url-input {
+  min-width: 0;
+  flex: 1;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  color: #fff;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+#server-url-input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+/* ── 게임 래퍼 ── */
+#game-wrapper {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* ── HUD ── */
+#hud {
+  width: 640px;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  border-bottom: none;
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #FFD700;
+}
+
+/* ── 캔버스 ── */
+#game-canvas {
+  display: block;
+  border: 2px solid #FFD700;
+  image-rendering: pixelated;
+}
+
+/* ── 대화창 ── */
+#dialogue-box {
+  display: none;
+  width: 640px;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  border-top: none;
+  padding: 14px 18px 10px;
+  min-height: 90px;
+  position: relative;
+}
+#dialogue-speaker {
+  font-size: 0.75rem;
+  color: #FFD700;
+  margin-bottom: 4px;
+  letter-spacing: 1px;
+}
+#dialogue-text {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #eee;
+  min-height: 40px;
+}
+#dialogue-next {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  font-size: 0.75rem;
+  color: #aaa;
+  animation: blink 1s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── 선택지 버튼 ── */
+#choices {
+  display: none;
+  width: 640px;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  border-top: none;
+  padding: 10px 18px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.choice-btn {
+  background: #1a1a2e;
+  color: #FFD700;
+  border: 2px solid #FFD700;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.choice-btn:hover { background: #FFD700; color: #1a1a2e; }
+
+/* ── LLM 채팅 UI ── */
+#chat-ui {
+  display: none;
+  width: 640px;
+  background: #0d0d1a;
+  border: 2px solid #00CED1;
+  border-top: none;
+  padding: 10px 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+#chat-messages {
+  max-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-bubble {
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  max-width: 80%;
+}
+.chat-bubble.player { background: #1e3a5f; align-self: flex-end; color: #cce; }
+.chat-bubble.rival  { background: #1a3a2e; align-self: flex-start; color: #cec; }
+#chat-input-row {
+  display: flex;
+  gap: 8px;
+}
+#chat-input {
+  flex: 1;
+  background: #111;
+  border: 1px solid #00CED1;
+  color: #fff;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+#chat-send { padding: 6px 14px; font-size: 0.85rem; }
+#chat-close {
+  align-self: flex-end;
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+#chat-close:hover { border-color: #aaa; color: #fff; }
+
+/* ── 스타터 선택 오버레이 ── */
+#starter-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+#starter-panel {
+  background: #0d0d1a;
+  border: 3px solid #FFD700;
+  padding: 30px 40px;
+  text-align: center;
+}
+#starter-panel h2 { color: #FFD700; margin-bottom: 20px; font-size: 1.3rem; }
+#starter-cards {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.starter-card {
+  width: 100px;
+  background: #1a1a2e;
+  border: 2px solid #555;
+  padding: 14px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+  text-align: center;
+}
+.starter-card:hover { border-color: #FFD700; transform: translateY(-4px); }
+.starter-icon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  margin: 0 auto 8px;
+}
+.starter-card .s-name { font-size: 0.9rem; color: #FFD700; font-weight: bold; }
+.starter-card .s-type { font-size: 0.75rem; color: #aaa; margin-top: 4px; }
+
+/* ── 전투 화면 ── */
+#battle-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #1a1a2e;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#battle-ui {
+  width: 640px;
+  background: #0d0d1a;
+  border: 2px solid #FFD700;
+  border-top: none;
+  padding: 12px 18px;
+}
+#battle-log {
+  font-size: 1rem;
+  color: #eee;
+  min-height: 28px;
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+}
+#battle-buttons {
+  display: flex;
+  gap: 10px;
+}
+#battle-buttons .btn { flex: 1; }
+#battle-buttons .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+#fade-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 420ms ease;
+  z-index: 500;
+}
