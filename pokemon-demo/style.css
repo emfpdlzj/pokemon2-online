@@ -96,6 +96,16 @@ body {
   margin-bottom: 12px;
   text-align: center;
 }
+.save-notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #15152a;
+  border: 1px solid #455070;
+  color: #d8def2;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  text-align: left;
+}
 .menu-panel label {
   display: block;
   margin-bottom: 6px;
