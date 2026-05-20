@@ -1,0 +1,115 @@
+{
+  "title": "Pokemon2 Online - Operations",
+  "description": "Operational dashboard for room count, player count, command latency, tick delay, and rejected move reasons during load tests.",
+  "layout_type": "ordered",
+  "widgets": [
+    {
+      "definition": {
+        "type": "query_value",
+        "title": "Rooms",
+        "requests": [
+          {
+            "q": "avg:pokemon2.room.count{service:pokemon2-online-server}"
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "definition": {
+        "type": "query_value",
+        "title": "Players",
+        "requests": [
+          {
+            "q": "avg:pokemon2.player.count{service:pokemon2-online-server}"
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Accepted vs Rejected Moves",
+        "requests": [
+          {
+            "display_type": "line",
+            "q": "sum:pokemon2.moves.accepted{service:pokemon2-online-server}.as_count()"
+          },
+          {
+            "display_type": "line",
+            "q": "sum:pokemon2.moves.rejected{service:pokemon2-online-server}.as_count()"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Rejected Moves by Reason",
+        "requests": [
+          {
+            "display_type": "bars",
+            "q": "sum:pokemon2.moves.rejected.by_reason{service:pokemon2-online-server} by {reason}.as_count()"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Command Latency",
+        "requests": [
+          {
+            "display_type": "line",
+            "q": "avg:pokemon2.command.latency.avg_ms{service:pokemon2-online-server}"
+          },
+          {
+            "display_type": "line",
+            "q": "max:pokemon2.command.latency.max_ms{service:pokemon2-online-server}"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Tick Delay",
+        "requests": [
+          {
+            "display_type": "line",
+            "q": "avg:pokemon2.tick.delay.avg_ms{service:pokemon2-online-server}"
+          },
+          {
+            "display_type": "line",
+            "q": "max:pokemon2.tick.delay.max_ms{service:pokemon2-online-server}"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "toplist",
+        "title": "Per-room Player Count",
+        "requests": [
+          {
+            "q": "avg:pokemon2.room.player_count{service:pokemon2-online-server} by {room_id}"
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "toplist",
+        "title": "Per-room Rejected Moves",
+        "requests": [
+          {
+            "q": "sum:pokemon2.room.moves.rejected{service:pokemon2-online-server} by {room_id}.as_count()"
+          }
+        ]
+      }
+    }
+  ]
+}

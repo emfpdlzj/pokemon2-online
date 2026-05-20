@@ -16,5 +16,21 @@ services:
       timeout: 3s
       retries: 10
 
+  datadog:
+    image: gcr.io/datadoghq/agent:7
+    container_name: pokemon2-datadog-agent
+    profiles:
+      - observability
+    environment:
+      DD_API_KEY: ${DD_API_KEY:-}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_ENV: ${DD_ENV:-local}
+      DD_SERVICE: ${DD_SERVICE:-pokemon2-online-server}
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "false"
+      DD_APM_ENABLED: "false"
+    ports:
+      - "${DD_DOGSTATSD_PORT:-8125}:8125/udp"
+
 volumes:
   pokemon2-postgres-data:
