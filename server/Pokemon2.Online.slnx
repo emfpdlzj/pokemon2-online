@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Pokemon2.LoadTest/Pokemon2.LoadTest.csproj" />
   <Project Path="Pokemon2.Server/Pokemon2.Server.csproj" />
+  <Project Path="Pokemon2.Server.Tests/Pokemon2.Server.Tests.csproj" />
 </Solution>
