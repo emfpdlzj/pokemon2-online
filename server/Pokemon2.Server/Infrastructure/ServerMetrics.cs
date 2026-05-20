@@ -8,6 +8,8 @@ public sealed class ServerMetrics
     private long _acceptedMoves;
     private long _rejectedMoves;
     private long _ticks;
+    private long _activeBattles;
+    private long _completedBattles;
     private long _commandLatencyTotalTicks;
     private long _commandLatencySamples;
 
@@ -17,6 +19,9 @@ public sealed class ServerMetrics
     public void IncrementAcceptedMove() => Interlocked.Increment(ref _acceptedMoves);
     public void IncrementRejectedMove() => Interlocked.Increment(ref _rejectedMoves);
     public void IncrementTick() => Interlocked.Increment(ref _ticks);
+    public void IncrementActiveBattles() => Interlocked.Increment(ref _activeBattles);
+    public void DecrementActiveBattles() => Interlocked.Decrement(ref _activeBattles);
+    public void IncrementCompletedBattles() => Interlocked.Increment(ref _completedBattles);
 
     public void RecordCommandLatency(TimeSpan latency)
     {
@@ -38,6 +43,8 @@ public sealed class ServerMetrics
             acceptedMoves = Interlocked.Read(ref _acceptedMoves),
             rejectedMoves = Interlocked.Read(ref _rejectedMoves),
             ticks = Interlocked.Read(ref _ticks),
+            activeBattles = Interlocked.Read(ref _activeBattles),
+            completedBattles = Interlocked.Read(ref _completedBattles),
             averageCommandLatencyMs = Math.Round(avgMs, 3)
         };
     }

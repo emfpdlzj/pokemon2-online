@@ -1,4 +1,5 @@
 using Pokemon2.Server.Infrastructure;
+using Pokemon2.Server.Data;
 
 namespace Pokemon2.Server.Game;
 
@@ -8,11 +9,13 @@ public sealed class RoomManager
     private readonly Dictionary<string, RoomActor> _rooms = new(StringComparer.OrdinalIgnoreCase);
     private readonly MapCatalog _maps;
     private readonly ServerMetrics _metrics;
+    private readonly IBattleResultStore _battleResults;
 
-    public RoomManager(MapCatalog maps, ServerMetrics metrics)
+    public RoomManager(MapCatalog maps, ServerMetrics metrics, IBattleResultStore? battleResults = null)
     {
         _maps = maps;
         _metrics = metrics;
+        _battleResults = battleResults ?? new NoopBattleResultStore();
         CreateRoom("기본 방", "hometown");
     }
 
@@ -21,7 +24,7 @@ public sealed class RoomManager
         var id = $"room-{Guid.NewGuid():N}"[..13];
         var map = _maps.GetOrDefault(mapId);
         var name = string.IsNullOrWhiteSpace(roomName) ? $"방 {_rooms.Count + 1}" : roomName.Trim();
-        var room = new RoomActor(id, name, map, _metrics);
+        var room = new RoomActor(id, name, map, _metrics, _battleResults);
 
         lock (_gate)
         {

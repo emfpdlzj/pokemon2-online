@@ -8,5 +8,7 @@ public sealed class ClientMessage
     public string? Direction { get; set; }
     public long Sequence { get; set; }
     public string? Message { get; set; }
+    public string? MonsterId { get; set; }
+    public string? SkillId { get; set; }
     public JsonElement? Payload { get; set; }
 }

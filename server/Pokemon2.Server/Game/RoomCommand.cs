@@ -19,6 +19,13 @@ public abstract record RoomCommand
         long Sequence,
         CancellationToken CancellationToken) : RoomCommand;
 
+    public sealed record Attack(
+        string PlayerId,
+        string? MonsterId,
+        string? SkillId,
+        long Sequence,
+        CancellationToken CancellationToken) : RoomCommand;
+
     public sealed record Chat(string PlayerId, string Message) : RoomCommand;
 
     public sealed record BattleEvent(string PlayerId, JsonElement Payload) : RoomCommand;

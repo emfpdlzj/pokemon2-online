@@ -17,6 +17,8 @@ public sealed class RoomManagerTests
         Assert.Equal("시작 마을", room.MapName);
         Assert.Equal(0, room.PlayerCount);
         Assert.Equal(4, room.MaxPlayers);
+        Assert.True(room.MonsterCount > 0);
+        Assert.Equal(0, room.ActiveBattleCount);
     }
 
     [Fact]

@@ -28,6 +28,7 @@ builder.Services.AddDbContext<GameDbContext>(options =>
 });
 builder.Services.AddSingleton<MapCatalog>();
 builder.Services.AddSingleton<ServerMetrics>();
+builder.Services.AddSingleton<IBattleResultStore, EfBattleResultStore>();
 builder.Services.AddSingleton<RoomManager>();
 builder.Services.AddSingleton<WebSocketGameEndpoint>();
 

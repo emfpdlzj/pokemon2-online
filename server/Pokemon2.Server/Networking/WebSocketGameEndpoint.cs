@@ -65,6 +65,9 @@ public sealed class WebSocketGameEndpoint
                 case "move" when Enum.TryParse<Direction>(message.Direction, true, out var direction):
                     await room.EnqueueAsync(new RoomCommand.Move(playerId, direction, message.Sequence, cancellationToken));
                     break;
+                case "attack":
+                    await room.EnqueueAsync(new RoomCommand.Attack(playerId, message.MonsterId, message.SkillId, message.Sequence, cancellationToken));
+                    break;
                 case "chat" when !string.IsNullOrWhiteSpace(message.Message):
                     await room.EnqueueAsync(new RoomCommand.Chat(playerId, message.Message.Trim()[..Math.Min(message.Message.Trim().Length, 80)]));
                     break;

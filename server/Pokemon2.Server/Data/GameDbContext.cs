@@ -9,6 +9,7 @@ public sealed class GameDbContext : DbContext
     }
 
     public DbSet<PlayerSave> PlayerSaves => Set<PlayerSave>();
+    public DbSet<BattleResult> BattleResults => Set<BattleResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,5 +33,19 @@ public sealed class GameDbContext : DbContext
         save.Property(x => x.CreatedAt).HasColumnName("created_at");
         save.Property(x => x.UpdatedAt).HasColumnName("updated_at");
         save.HasIndex(x => new { x.Mode, x.SlotNumber }).IsUnique();
+
+        var battle = modelBuilder.Entity<BattleResult>();
+        battle.ToTable("battle_results");
+        battle.HasKey(x => x.Id);
+        battle.Property(x => x.Id).HasColumnName("id");
+        battle.Property(x => x.RoomId).HasColumnName("room_id").HasMaxLength(40);
+        battle.Property(x => x.PlayerId).HasColumnName("player_id").HasMaxLength(64);
+        battle.Property(x => x.PlayerName).HasColumnName("player_name").HasMaxLength(40);
+        battle.Property(x => x.MonsterId).HasColumnName("monster_id").HasMaxLength(64);
+        battle.Property(x => x.MonsterName).HasColumnName("monster_name").HasMaxLength(40);
+        battle.Property(x => x.Won).HasColumnName("won");
+        battle.Property(x => x.ServerTick).HasColumnName("server_tick");
+        battle.Property(x => x.CreatedAt).HasColumnName("created_at");
+        battle.HasIndex(x => new { x.RoomId, x.CreatedAt });
     }
 }
