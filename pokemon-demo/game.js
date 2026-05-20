@@ -212,8 +212,9 @@ const CANVAS_W = 640;
 const CANVAS_H = 480;
 const TILE     = 32;
 const MOVE_DELAY = 0; // ms, 다음 이동 입력 허용 간격
-const MOVE_DURATION = 180; // ms, 한 타일 실제 이동 시간
-const NPC_MOVE_DURATION = 180; // ms, NPC 한 타일 이동 시간
+const MOVE_DURATION = 220; // ms, 한 타일 실제 이동 시간
+const NPC_MOVE_DURATION = 220; // ms, NPC 한 타일 이동 시간
+const NPC_STEP_DELAY = NPC_MOVE_DURATION + 30; // ms, 다음 NPC 이동까지 대기
 
 // 렌더링용 픽셀 좌표
 let renderX = 0, renderY = 0;
@@ -1559,7 +1560,7 @@ function triggerRivalLabEvent(callback) {
           map.npcs = map.npcs.filter(n => n.id !== "rival_lab");
           if (callback) callback();
         }
-      }, 120);
+      }, NPC_STEP_DELAY);
     } else {
       if (callback) callback();
     }
@@ -1609,7 +1610,7 @@ function triggerBinnaCongratsEvent() {
       setNpcTile(binna, homePos.tx, homePos.ty, 1);
       state.phase = "game";
     });
-  }, 140);
+  }, NPC_STEP_DELAY);
 }
 
 function triggerBinnaTown2Event() {
