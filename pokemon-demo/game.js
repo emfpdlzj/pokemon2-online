@@ -1339,7 +1339,7 @@ function updateMovement(ts) {
   if (!moveState.startTs) moveState.startTs = ts;
 
   const progress = Math.min(1, (ts - moveState.startTs) / MOVE_DURATION);
-  const eased = easeOutQuad(progress);
+  const eased = easeInOutQuad(progress);
   renderX = moveState.fromX + (moveState.toX - moveState.fromX) * eased;
   renderY = moveState.fromY + (moveState.toY - moveState.fromY) * eased;
 
@@ -1552,7 +1552,7 @@ function triggerRivalLabEvent(callback) {
     if (rival) {
       let step = 0;
       const exit = setInterval(() => {
-        rival.ty += 1;
+        moveNpcBy(rival, 0, 1);
         step++;
         if (step >= 4) {
           clearInterval(exit);
@@ -1593,23 +1593,20 @@ function triggerBinnaCongratsEvent() {
   }
 
   const homePos = { tx: 13, ty: 13 };
-  binna.tx = 10;
-  binna.ty = 8;
+  setNpcTile(binna, 10, 8, 1);
   const path = [[-1, 0], [0, -1]];
   let step = 0;
   const walk = setInterval(() => {
     const move = path[step++];
     if (move) {
-      binna.tx += move[0];
-      binna.ty += move[1];
+      moveNpcBy(binna, move[0], move[1]);
       return;
     }
     clearInterval(walk);
     state.events.binnaCongrats = true;
     saveGame();
     showDialogue(["와, {playerName}! 포켓몬 받았구나!", "정말 축하해! 이제 같이 멋진 모험 하자!"], "빛나", () => {
-      binna.tx = homePos.tx;
-      binna.ty = homePos.ty;
+      setNpcTile(binna, homePos.tx, homePos.ty, 1);
       state.phase = "game";
     });
   }, 140);
@@ -1794,19 +1791,22 @@ async function fetchJson(url, options) {
 //  게임 루프
 // ============================================================
 function gameLoop(ts) {
-  if (state.phase !== "game") { requestAnimationFrame(gameLoop); return; }
+  const canRenderMap = state.phase === "game" || state.phase === "cutscene";
+  if (!canRenderMap) { requestAnimationFrame(gameLoop); return; }
 
-  updateMovement(ts);
+  if (state.phase === "game") {
+    updateMovement(ts);
 
-  // 이동 처리
-  if (!moveState.active && ts - lastMoveTime > MOVE_DELAY) {
-    if      (keys["ArrowUp"]    || keys["w"]) { if (tryMove(0, -1)) lastMoveTime = ts; }
-    else if (keys["ArrowDown"]  || keys["s"]) { if (tryMove(0,  1)) lastMoveTime = ts; }
-    else if (keys["ArrowLeft"]  || keys["a"]) { if (tryMove(-1, 0)) lastMoveTime = ts; }
-    else if (keys["ArrowRight"] || keys["d"]) { if (tryMove( 1, 0)) lastMoveTime = ts; }
+    // 이동 처리
+    if (!moveState.active && ts - lastMoveTime > MOVE_DELAY) {
+      if      (keys["ArrowUp"]    || keys["w"]) { if (tryMove(0, -1)) lastMoveTime = ts; }
+      else if (keys["ArrowDown"]  || keys["s"]) { if (tryMove(0,  1)) lastMoveTime = ts; }
+      else if (keys["ArrowLeft"]  || keys["a"]) { if (tryMove(-1, 0)) lastMoveTime = ts; }
+      else if (keys["ArrowRight"] || keys["d"]) { if (tryMove( 1, 0)) lastMoveTime = ts; }
+    }
   }
 
-  drawMap();
+  drawMap(ts);
   requestAnimationFrame(gameLoop);
 }
 
