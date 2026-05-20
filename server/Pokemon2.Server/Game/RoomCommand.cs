@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Text.Json;
 
 namespace Pokemon2.Server.Game;
 
@@ -19,6 +20,8 @@ public abstract record RoomCommand
         CancellationToken CancellationToken) : RoomCommand;
 
     public sealed record Chat(string PlayerId, string Message) : RoomCommand;
+
+    public sealed record BattleEvent(string PlayerId, JsonElement Payload) : RoomCommand;
 
     public sealed record Tick : RoomCommand;
 }

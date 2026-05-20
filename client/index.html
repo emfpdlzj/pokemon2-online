@@ -87,11 +87,17 @@
   <!-- 전투 화면 -->
   <div id="battle-screen">
     <canvas id="battle-canvas"></canvas>
+    <div id="battle-waiting-panel">
+      <div id="battle-waiting-title">팀원 전투 대기 중</div>
+      <div id="battle-waiting-text">다음 유저 턴에 입장합니다.</div>
+      <button id="battle-join-confirm" class="btn" type="button">전투 참여</button>
+    </div>
     <div id="battle-ui">
       <div id="battle-log">전투 준비 중...</div>
       <div id="battle-buttons">
         <button id="b-attack" class="btn" disabled>⚔️ 공격</button>
         <button id="b-skill"  class="btn" disabled>✨ 필살기</button>
+        <button id="b-team"   class="btn" disabled>🤝 협동</button>
         <button id="b-run"    class="btn" disabled>🏃 도망</button>
       </div>
     </div>

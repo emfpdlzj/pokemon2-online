@@ -332,6 +332,12 @@ const state = {
   phase: "title",         // title | game | cutscene
 };
 
+const multiplayer = {
+  socket: null,
+  playerId: null,
+  moveSequence: 0,
+};
+
 // ============================================================
 //  DOM 참조
 // ============================================================
@@ -1314,6 +1320,7 @@ function finishMove() {
   moveState.arrived = true;
   state.px = moveState.targetX;
   state.py = moveState.targetY;
+  sendMultiplayerMove();
 
   const map = getMapData();
 
@@ -1788,6 +1795,73 @@ async function fetchJson(url, options) {
   return res.json();
 }
 
+function connectMultiplayer(wsUrl) {
+  disconnectMultiplayer();
+  if (!wsUrl) return;
+
+  const socket = new WebSocket(wsUrl);
+  multiplayer.socket = socket;
+  multiplayer.playerId = null;
+  multiplayer.moveSequence = 0;
+
+  socket.addEventListener("message", event => {
+    let envelope;
+    try {
+      envelope = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    if (envelope.type === "joined") {
+      multiplayer.playerId = envelope.payload?.playerId || null;
+      return;
+    }
+
+    if (envelope.type === "battle_event" && envelope.payload?.playerId !== multiplayer.playerId) {
+      if (typeof handleBattleEvent === "function") {
+        handleBattleEvent(envelope.payload.playerId, envelope.payload.payload);
+      }
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    if (multiplayer.socket === socket) {
+      multiplayer.socket = null;
+      multiplayer.playerId = null;
+    }
+  });
+}
+
+function disconnectMultiplayer() {
+  if (multiplayer.socket && multiplayer.socket.readyState <= WebSocket.OPEN) {
+    multiplayer.socket.close();
+  }
+  multiplayer.socket = null;
+  multiplayer.playerId = null;
+}
+
+function sendMultiplayer(type, payload) {
+  const socket = multiplayer.socket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify({ type, payload }));
+  return true;
+}
+
+function sendBattleEvent(payload) {
+  return sendMultiplayer("battle_event", payload);
+}
+
+function sendMultiplayerMove() {
+  const socket = multiplayer.socket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  multiplayer.moveSequence += 1;
+  socket.send(JSON.stringify({
+    type: "move",
+    direction: playerDir,
+    sequence: multiplayer.moveSequence,
+  }));
+}
+
 // ============================================================
 //  게임 루프
 // ============================================================
@@ -1829,7 +1903,7 @@ function getEnteredPlayerName() {
   return nameVal || "주인공";
 }
 
-function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null } = {}) {
+function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null, wsUrl = null } = {}) {
   activeSlotNumber = slotNumber;
   activeSaveId = saveId;
   localStorage.setItem("pokemonDemoActiveSlot", String(activeSlotNumber));
@@ -1843,6 +1917,9 @@ function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState 
   } else {
     resetState(getEnteredPlayerName(), mode, roomId);
   }
+
+  if (state.mode === "multi") connectMultiplayer(wsUrl);
+  else disconnectMultiplayer();
 
   startScreen.style.display = "none";
   gameWrapper.style.display = "flex";
@@ -1932,7 +2009,7 @@ async function renderRooms() {
           body: JSON.stringify({ playerName: getEnteredPlayerName() }),
         });
         setStatus(`멀티 방 참가: ${joined.room.roomName}`);
-        beginGame({ mode: "multi", slotNumber: 1, roomId: joined.room.roomId });
+        beginGame({ mode: "multi", slotNumber: 1, roomId: joined.room.roomId, wsUrl: joined.wsUrl });
       };
       roomListEl.appendChild(button);
     });

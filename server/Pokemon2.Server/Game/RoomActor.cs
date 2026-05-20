@@ -82,6 +82,14 @@ public sealed class RoomActor
                             message = chat.Message
                         }));
                         break;
+                    case RoomCommand.BattleEvent battle:
+                        if (!_players.ContainsKey(battle.PlayerId)) break;
+                        await BroadcastAsync(new ServerEnvelope("battle_event", new
+                        {
+                            playerId = battle.PlayerId,
+                            payload = battle.Payload
+                        }));
+                        break;
                     case RoomCommand.Tick:
                         await HandleTickAsync();
                         break;

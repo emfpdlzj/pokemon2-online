@@ -378,6 +378,32 @@ body {
   cursor: not-allowed;
   transform: none;
 }
+#battle-waiting-panel {
+  display: none;
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  background: rgba(13, 13, 26, 0.94);
+  border: 2px solid #FFD700;
+  padding: 18px;
+  text-align: center;
+  z-index: 2;
+}
+#battle-waiting-title {
+  color: #FFD700;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+#battle-waiting-text {
+  color: #e8eefc;
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+}
+#battle-join-confirm {
+  min-width: 160px;
+}
 
 #fade-overlay {
   position: fixed;

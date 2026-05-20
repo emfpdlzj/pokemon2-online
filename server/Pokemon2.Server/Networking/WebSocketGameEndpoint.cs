@@ -68,6 +68,9 @@ public sealed class WebSocketGameEndpoint
                 case "chat" when !string.IsNullOrWhiteSpace(message.Message):
                     await room.EnqueueAsync(new RoomCommand.Chat(playerId, message.Message.Trim()[..Math.Min(message.Message.Trim().Length, 80)]));
                     break;
+                case "battle_event" when message.Payload.HasValue:
+                    await room.EnqueueAsync(new RoomCommand.BattleEvent(playerId, message.Payload.Value));
+                    break;
             }
         }
     }
