@@ -11,4 +11,8 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\client\data\maps.json" Link="data\maps.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

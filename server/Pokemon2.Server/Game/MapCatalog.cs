@@ -1,45 +1,21 @@
 namespace Pokemon2.Server.Game;
 
+using System.Text.Json;
+
 public sealed class MapCatalog
 {
+    private const int WallTile = 1;
+
     private readonly Dictionary<string, GameMap> _maps;
 
     public MapCatalog()
     {
-        var hometownBlocks = new List<Position>();
-        for (var x = 0; x < 20; x++)
-        {
-            hometownBlocks.Add(new Position(x, 0));
-            hometownBlocks.Add(new Position(x, 14));
-        }
+        _maps = LoadMaps(ResolveDefaultMapPath());
+    }
 
-        for (var y = 0; y < 15; y++)
-        {
-            hometownBlocks.Add(new Position(0, y));
-            hometownBlocks.Add(new Position(19, y));
-        }
-
-        hometownBlocks.AddRange(Rect(5, 5, 4, 4));
-        hometownBlocks.AddRange(Rect(11, 10, 4, 3));
-
-        var routeBlocks = new List<Position>();
-        for (var x = 0; x < 20; x++)
-        {
-            routeBlocks.Add(new Position(x, 0));
-            routeBlocks.Add(new Position(x, 39));
-        }
-
-        for (var y = 0; y < 40; y++)
-        {
-            routeBlocks.Add(new Position(0, y));
-            routeBlocks.Add(new Position(19, y));
-        }
-
-        _maps = new[]
-        {
-            new GameMap("hometown", "시작 마을", 20, 15, hometownBlocks) { SpawnPoint = new Position(9, 9) },
-            new GameMap("route1", "1번 도로", 20, 40, routeBlocks) { SpawnPoint = new Position(1, 7) }
-        }.ToDictionary(map => map.Id, StringComparer.OrdinalIgnoreCase);
+    internal MapCatalog(string mapDataPath)
+    {
+        _maps = LoadMaps(mapDataPath);
     }
 
     public GameMap GetOrDefault(string? mapId)
@@ -52,14 +28,90 @@ public sealed class MapCatalog
         return _maps["hometown"];
     }
 
-    private static IEnumerable<Position> Rect(int x, int y, int width, int height)
+    private static Dictionary<string, GameMap> LoadMaps(string mapDataPath)
     {
-        for (var ty = y; ty < y + height; ty++)
+        using var stream = File.OpenRead(mapDataPath);
+        var definitions = JsonSerializer.Deserialize<Dictionary<string, MapDefinition>>(stream, JsonOptions)
+            ?? throw new InvalidOperationException($"Map data is empty: {mapDataPath}");
+
+        return definitions.Select(entry =>
         {
-            for (var tx = x; tx < x + width; tx++)
+            var id = entry.Key;
+            var definition = entry.Value;
+            var blockedTiles = GetBlockedTiles(definition);
+            var map = new GameMap(id, definition.Name, definition.Width, definition.Height, blockedTiles)
             {
-                yield return new Position(tx, ty);
+                SpawnPoint = new Position(definition.PlayerStart.Tx, definition.PlayerStart.Ty)
+            };
+
+            return map;
+        }).ToDictionary(map => map.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<Position> GetBlockedTiles(MapDefinition definition)
+    {
+        for (var y = 0; y < definition.Tiles.Count; y++)
+        {
+            var row = definition.Tiles[y];
+            for (var x = 0; x < row.Count; x++)
+            {
+                if (row[x] == WallTile)
+                {
+                    yield return new Position(x, y);
+                }
             }
         }
+
+        foreach (var npc in definition.Npcs)
+        {
+            yield return new Position(npc.Tx, npc.Ty);
+        }
     }
+
+    private static string ResolveDefaultMapPath()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "data", "maps.json"),
+            Path.Combine(AppContext.BaseDirectory, "client", "data", "maps.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "client", "data", "maps.json")
+        };
+
+        var path = candidates.FirstOrDefault(File.Exists);
+        if (path is not null)
+        {
+            return path;
+        }
+
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            path = Path.Combine(directory.FullName, "client", "data", "maps.json");
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Could not find map data file.", "client/data/maps.json");
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private sealed record MapDefinition(
+        string Name,
+        int Width,
+        int Height,
+        List<List<int>> Tiles,
+        List<NpcDefinition> Npcs,
+        PointDefinition PlayerStart);
+
+    private sealed record NpcDefinition(int Tx, int Ty);
+
+    private sealed record PointDefinition(int Tx, int Ty);
 }
