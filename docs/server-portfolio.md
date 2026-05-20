@@ -16,6 +16,7 @@
 - 서버 권위형 이동 판정
 - 서버 권위형 전투 판정과 결과 저장
 - 부하 테스트용 C# WebSocket 봇 클라이언트
+- Artillery 기반 WebSocket 부하 테스트
 
 ## 서버 구조
 
@@ -217,6 +218,22 @@ docker compose up -d postgres
 dotnet build server/Pokemon2.Server/Pokemon2.Server.csproj
 dotnet server/Pokemon2.Server/bin/Debug/net10.0/Pokemon2.Server.dll --urls http://localhost:5199
 ```
+
+## 부하 테스트
+
+게임 도메인 검증은 C# `Pokemon2.LoadTest`가 담당한다. 이 테스트는 `player_moved`, `move_rejected` 응답을 직접 파싱해 이동 승인/거부와 RTT를 기록한다.
+
+오픈소스 부하 리포트는 Artillery가 담당한다. `load-tests/artillery`에는 두 가지 WebSocket 시나리오가 있다.
+
+```bash
+npm run load:artillery:hot-room
+npm run load:artillery:rooms
+```
+
+- `hot-room`: 4명의 가상 유저를 같은 방에 연결해 빠른/보통/느린 이동 입력을 섞는다.
+- `room-scale`: 가상 유저마다 방을 생성해 RoomActor 수 증가와 WebSocket 메시지 처리량을 확인한다.
+
+Artillery 실행 후 `GET /api/admin/metrics`의 `acceptedMoves`, `rejectedMoves`, `averageCommandLatencyMs`를 함께 기록한다.
 
 ## 검증
 

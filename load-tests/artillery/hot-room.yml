@@ -1,0 +1,24 @@
+config:
+  target: "ws://localhost:5199"
+  processor: "./processor.mjs"
+  phases:
+    - name: four-player-collision-window
+      duration: 15
+      arrivalCount: 4
+  variables:
+    pace:
+      - fast
+      - normal
+      - slow
+scenarios:
+  - name: shared-room-websocket-movement
+    engine: ws
+    flow:
+      - connect:
+          function: connectHotRoom
+      - loop:
+          - function: nextMove
+          - send: "{{ moveMessage }}"
+          - function: paceMove
+        count: 50
+      - think: 1

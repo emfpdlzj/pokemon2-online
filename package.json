@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "load:artillery:rooms": "artillery run load-tests/artillery/room-scale.yml",
+    "load:artillery:hot-room": "artillery run load-tests/artillery/hot-room.yml"
+  },
+  "devDependencies": {
+    "artillery": "^2.0.25"
+  }
+}

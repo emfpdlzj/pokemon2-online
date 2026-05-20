@@ -1,0 +1,27 @@
+config:
+  target: "ws://localhost:5199"
+  processor: "./processor.mjs"
+  phases:
+    - name: warmup
+      duration: 20
+      arrivalRate: 1
+    - name: room-actor-scale
+      duration: 40
+      arrivalRate: 5
+  variables:
+    pace:
+      - normal
+      - fast
+      - slow
+scenarios:
+  - name: isolated-room-websocket-movement
+    engine: ws
+    flow:
+      - connect:
+          function: connectIsolatedRoom
+      - loop:
+          - function: nextMove
+          - send: "{{ moveMessage }}"
+          - function: paceMove
+        count: 40
+      - think: 1
