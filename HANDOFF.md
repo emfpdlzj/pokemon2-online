@@ -113,8 +113,10 @@ docker compose down -v
 
 ```bash
 dotnet build server/Pokemon2.Server/Pokemon2.Server.csproj
-node --check client/game.js
-node --check client/battle.js
+node --check client/src/main.js
+node --check client/src/app/bootstrap.js
+node --check client/src/game/createGameRuntime.js
+node --check client/src/battle/createBattleRuntime.js
 node scripts/build-client-env.mjs
 docker compose config
 ```

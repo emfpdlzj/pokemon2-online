@@ -1,5 +1,19 @@
+export function createBattleRuntime(game) {
+const {
+  state,
+  maps: MAPS,
+  normalizeStarter,
+  getStarterTemplate,
+  getStarterStats,
+  createStarterFromTemplate,
+  awardStarterExp,
+  saveGame,
+  updateHUD,
+  sendBattleEvent,
+} = game;
+
 // ============================================================
-//  battle.js - 턴제 전투 시스템
+//  턴제 전투 시스템
 // ============================================================
 
 // ── 야생/트레이너 몬스터 데이터 ──
@@ -573,4 +587,12 @@ function startWildBattle(onEnd) {
 function startTrainerBattle(trainerId, onEnd) {
   const mon = TRAINER_MONSTERS[trainerId] || WILD_MONSTERS[0];
   startBattle({ ...mon, battleIntro: `${mon.name}이(가) 승부를 걸어왔다!` }, onEnd);
+}
+
+return {
+  startBattle,
+  startWildBattle,
+  startTrainerBattle,
+  handleBattleEvent,
+};
 }

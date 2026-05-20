@@ -1,7 +1,11 @@
+export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV || {} }) {
+const MAPS = maps;
+const DIALOGUES = dialogues;
+
 // ============================================================
 //  LLM 설정 (여기만 수정하면 다른 API로 교체 가능)
 // ============================================================
-const CLIENT_ENV = window.POKEMON2_ENV || {};
+const CLIENT_ENV = env;
 const API_KEY    = CLIENT_ENV.POKEMON2_LLM_API_KEY || "";
 const API_URL    = CLIENT_ENV.POKEMON2_LLM_API_URL || "";
 const MODEL_NAME = CLIENT_ENV.POKEMON2_LLM_MODEL || "";
@@ -342,6 +346,27 @@ const multiplayer = {
   playerId: null,
   moveSequence: 0,
 };
+
+let battleRuntime = null;
+
+function setBattleRuntime(runtime) {
+  battleRuntime = runtime;
+}
+
+function startWildBattle(onEnd) {
+  if (!battleRuntime) throw new Error("Battle runtime is not configured.");
+  return battleRuntime.startWildBattle(onEnd);
+}
+
+function startTrainerBattle(trainerId, onEnd) {
+  if (!battleRuntime) throw new Error("Battle runtime is not configured.");
+  return battleRuntime.startTrainerBattle(trainerId, onEnd);
+}
+
+function handleBattleEvent(senderId, payload) {
+  if (!battleRuntime) return;
+  return battleRuntime.handleBattleEvent(senderId, payload);
+}
 
 // ============================================================
 //  DOM 참조
@@ -2065,3 +2090,18 @@ document.getElementById("create-room-btn").addEventListener("click", async () =>
 
 // 채팅 전송
 // 채팅 UI 제거됨 - 라이벌 대화는 선택지 방식으로 통합
+
+return {
+  state,
+  maps: MAPS,
+  normalizeStarter,
+  getStarterTemplate,
+  getStarterStats,
+  createStarterFromTemplate,
+  awardStarterExp,
+  saveGame,
+  updateHUD,
+  sendBattleEvent,
+  setBattleRuntime,
+};
+}
