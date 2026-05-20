@@ -11,4 +11,8 @@ TestResults/
 *.log
 .env
 .env.*
+client/env.js
 
+!.env.example
+!client/.env.example
+!server/.env.example

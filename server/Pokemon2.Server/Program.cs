@@ -4,6 +4,8 @@ using Pokemon2.Server.Game;
 using Pokemon2.Server.Infrastructure;
 using Pokemon2.Server.Networking;
 
+DotEnv.LoadForServer();
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
@@ -20,7 +22,7 @@ builder.Services.AddDbContext<GameDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? Environment.GetEnvironmentVariable("POKEMON2_DATABASE_URL")
-        ?? "Host=localhost;Port=5432;Database=pokemon2;Username=postgres;Password=postgres";
+        ?? throw new InvalidOperationException("Database connection is not configured. Set ConnectionStrings__DefaultConnection or POKEMON2_DATABASE_URL in .env or server/.env.");
 
     options.UseNpgsql(NormalizePostgresConnectionString(connectionString));
 });

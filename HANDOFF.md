@@ -2,16 +2,29 @@
 
 ## 로컬 실행 방법
 
+### 0. 환경변수 준비
+
+루트 공용 `.env`가 먼저 로드되고, 클라이언트는 `client/.env`, 서버는 `server/.env` 값으로 필요한 항목을 덮어쓴다.
+
+```bash
+cp .env.example .env
+cp client/.env.example client/.env
+cp server/.env.example server/.env
+node scripts/build-client-env.mjs
+```
+
+`client/env.js`는 브라우저에 그대로 노출되는 런타임 설정 파일이다. Gemini 키를 넣으면 사용자가 볼 수 있으므로 공개 가능한 키만 사용한다.
+
 ### 1. PostgreSQL 실행
 
 Docker Desktop이 켜져 있으면 아래 명령으로 개발용 DB를 실행한다.
 
 ```bash
-cd /Users/emfpdlzj/Desktop/NxtCloud-pokemon2
+cd /Users/emfpdlzj/Desktop/pokemon2-online
 docker compose up -d postgres
 ```
 
-Docker를 쓰지 않고 로컬 PostgreSQL을 직접 쓸 수도 있다. 이 경우 아래 DB가 있어야 한다.
+Docker를 쓰지 않고 로컬 PostgreSQL을 직접 쓸 수도 있다. 이 경우 `server/.env`의 `ConnectionStrings__DefaultConnection`이 실제 DB와 일치해야 한다.
 
 ```text
 Host=localhost
@@ -30,11 +43,11 @@ psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE pokemon2;'
 ### 2. 백엔드 서버 실행
 
 ```bash
-cd /Users/emfpdlzj/Desktop/NxtCloud-pokemon2
+cd /Users/emfpdlzj/Desktop/pokemon2-online
 dotnet run --project server/Pokemon2.Server/Pokemon2.Server.csproj
 ```
 
-기본 주소는 아래와 같다.
+서버 주소는 루트 `.env`의 `POKEMON2_API_BASE`와 `server/Pokemon2.Server/Properties/launchSettings.json`을 맞춰 사용한다. 현재 로컬 기본값은 아래와 같다.
 
 ```text
 http://localhost:5140
@@ -55,7 +68,7 @@ curl -s 'http://localhost:5140/api/saves?mode=single'
 새 터미널에서 정적 서버를 실행한다.
 
 ```bash
-cd /Users/emfpdlzj/Desktop/NxtCloud-pokemon2/pokemon-demo
+cd /Users/emfpdlzj/Desktop/pokemon2-online/client
 python3 -m http.server 8000
 ```
 
@@ -90,8 +103,8 @@ docker compose down -v
 
 ## 자주 확인할 점
 
-- 백엔드 서버 주소는 기본 `http://localhost:5140`이다.
-- 프론트는 기본적으로 이 주소로 API를 호출한다.
+- 백엔드 서버 주소는 `.env`와 `client/.env`의 `POKEMON2_API_BASE`로 정한다.
+- `client/.env`를 수정한 뒤에는 `node scripts/build-client-env.mjs`를 다시 실행한다.
 - PostgreSQL이 꺼져 있으면 세이브 API는 실패한다.
 - 프론트는 서버 저장 실패 시 브라우저 `localStorage` fallback을 사용한다.
 - Docker 실행 시 `Cannot connect to the Docker daemon`이 나오면 Docker Desktop을 먼저 켠다.
@@ -100,7 +113,8 @@ docker compose down -v
 
 ```bash
 dotnet build server/Pokemon2.Server/Pokemon2.Server.csproj
-node --check pokemon-demo/game.js
-node --check pokemon-demo/battle.js
+node --check client/game.js
+node --check client/battle.js
+node scripts/build-client-env.mjs
 docker compose config
 ```

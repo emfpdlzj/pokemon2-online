@@ -1,9 +1,10 @@
 // ============================================================
 //  LLM 설정 (여기만 수정하면 다른 API로 교체 가능)
 // ============================================================
-const API_KEY    = "AIzaSyDLstOJ2l2Itoi5nzxAmDHzqE9yjNub1kY";
-const API_URL    = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODEL_NAME = "gemini-2.0-flash";
+const CLIENT_ENV = window.POKEMON2_ENV || {};
+const API_KEY    = CLIENT_ENV.POKEMON2_LLM_API_KEY || "";
+const API_URL    = CLIENT_ENV.POKEMON2_LLM_API_URL || "";
+const MODEL_NAME = CLIENT_ENV.POKEMON2_LLM_MODEL || "";
 
 const RIVAL_SYSTEM_PROMPT = `
 너는 포켓몬풍 RPG 게임 속 플레이어의 소꿉친구 '리벨'이야.
@@ -125,6 +126,8 @@ function sanitizeRivalChoices(rawChoices, rivalMessage) {
 
 // ── LLM 요청 함수 (Gemini API) ──
 async function callLLMWithPrompt(systemPrompt, userMessage) {
+  if (!API_KEY || !API_URL || !MODEL_NAME) throw new Error("LLM config is not configured.");
+
   const url = `${API_URL}/${MODEL_NAME}:generateContent?key=${API_KEY}`;
   const res = await fetch(url, {
     method: "POST",
@@ -184,6 +187,8 @@ async function getBinnaReply(userMessage) {
 // 선택지 3개 생성
 async function getRivalChoices(rivalMessage) {
   try {
+    if (!API_KEY || !API_URL || !MODEL_NAME) throw new Error("LLM config is not configured.");
+
     const url = `${API_URL}/${MODEL_NAME}:generateContent?key=${API_KEY}`;
     const res = await fetch(url, {
       method: "POST",
@@ -1690,7 +1695,7 @@ function triggerAutoEvent(eventKey) {
 //  저장 / 불러오기
 // ============================================================
 const API_BASE_KEY = "pokemonDemoApiBase";
-const DEFAULT_API_BASE = "http://localhost:5140";
+const DEFAULT_API_BASE = CLIENT_ENV.POKEMON2_API_BASE || "";
 let apiBase = localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE;
 let activeSaveId = localStorage.getItem("pokemonDemoActiveSaveId") || null;
 let activeSlotNumber = Number(localStorage.getItem("pokemonDemoActiveSlot") || "1");
