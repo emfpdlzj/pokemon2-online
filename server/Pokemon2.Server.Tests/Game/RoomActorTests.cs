@@ -28,6 +28,38 @@ public sealed class RoomActorTests
     }
 
     [Fact]
+    public async Task ToSummary_IncludesRoomMoveMetrics()
+    {
+        var room = CreateRoom();
+        var p1 = new CapturingWebSocket();
+        var p2 = new CapturingWebSocket();
+        await JoinAsync(room, p1);
+        await JoinAsync(room, p2, "p2");
+
+        await room.EnqueueAsync(new RoomCommand.Move("p2", Direction.Right, 1, CancellationToken.None));
+        await p2.WaitForEnvelopeAsync("move_rejected");
+
+        await room.EnqueueAsync(new RoomCommand.Move("p1", Direction.Right, 1, CancellationToken.None));
+        await p1.WaitForEnvelopeAsync("player_moved");
+
+        await room.EnqueueAsync(new RoomCommand.Move("p1", Direction.Left, 1, CancellationToken.None));
+        await p1.WaitForEnvelopeAsync("move_rejected");
+
+        await room.EnqueueAsync(new RoomCommand.Move("p1", Direction.Left, 2, CancellationToken.None));
+        await p1.WaitForEnvelopeAsync("move_rejected");
+
+        var summary = room.ToSummary();
+        Assert.Equal(2, summary.PlayerCount);
+        Assert.Equal(1, summary.AcceptedMoves);
+        Assert.Equal(3, summary.RejectedMoves);
+        Assert.Equal(1, summary.RejectedMoveReasons.StaleSequence);
+        Assert.Equal(1, summary.RejectedMoveReasons.SpeedHackDetected);
+        Assert.Equal(1, summary.RejectedMoveReasons.TileOccupied);
+        Assert.True(summary.AverageCommandLatencyMs >= 0);
+        Assert.True(summary.MaxCommandLatencyMs >= 0);
+    }
+
+    [Fact]
     public async Task Attack_WhenTargetOutsideSkillRange_RejectsOutOfRange()
     {
         var room = CreateRoom();
@@ -94,9 +126,9 @@ public sealed class RoomActorTests
         return new RoomActor("room-test", "Test Room", map, new ServerMetrics(), store ?? new NoopBattleResultStore());
     }
 
-    private static async Task JoinAsync(RoomActor room, CapturingWebSocket socket)
+    private static async Task JoinAsync(RoomActor room, CapturingWebSocket socket, string playerId = "p1")
     {
-        await room.EnqueueAsync(new RoomCommand.Join("p1", "tester", socket, CancellationToken.None));
+        await room.EnqueueAsync(new RoomCommand.Join(playerId, "tester", socket, CancellationToken.None));
         await socket.WaitForEnvelopeAsync("joined");
     }
 

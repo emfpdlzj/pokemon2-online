@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Pokemon2.Server.Game;
 
 public sealed record RoomSnapshot(
@@ -41,4 +43,19 @@ public sealed record RoomSummary(
     int MonsterCount,
     int ActiveBattleCount,
     long ServerTick,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    long AcceptedMoves,
+    long RejectedMoves,
+    RejectedMoveReasonCounts RejectedMoveReasons,
+    double AverageCommandLatencyMs,
+    double MaxCommandLatencyMs,
+    double AverageTickDelayMs,
+    double MaxTickDelayMs);
+
+public sealed record RejectedMoveReasonCounts(
+    [property: JsonPropertyName("tile_occupied")]
+    long TileOccupied,
+    [property: JsonPropertyName("speed_hack_detected")]
+    long SpeedHackDetected,
+    [property: JsonPropertyName("stale_sequence")]
+    long StaleSequence);

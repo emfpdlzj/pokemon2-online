@@ -10,6 +10,9 @@ public sealed class RoomActor
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan MoveCooldown = TimeSpan.FromMilliseconds(100);
+    private const string TileOccupiedReason = "tile_occupied";
+    private const string SpeedHackDetectedReason = "speed_hack_detected";
+    private const string StaleSequenceReason = "stale_sequence";
     private const int MonsterAiIntervalTicks = 20;
 
     private readonly Channel<RoomCommand> _commands = Channel.CreateUnbounded<RoomCommand>(
@@ -24,8 +27,20 @@ public sealed class RoomActor
     private readonly Task _tickLoop;
 
     private long _tick;
+    private long _acceptedMoves;
+    private long _rejectedMoves;
+    private long _rejectedTileOccupied;
+    private long _rejectedSpeedHackDetected;
+    private long _rejectedStaleSequence;
+    private long _commandLatencyTotalTicks;
+    private long _commandLatencySamples;
+    private long _maxCommandLatencyTicks;
+    private long _tickDelayTotalTicks;
+    private long _tickDelaySamples;
+    private long _maxTickDelayTicks;
     private bool _snapshotDirty;
     private DateTimeOffset _lastSnapshotAt = DateTimeOffset.MinValue;
+    private DateTimeOffset? _lastTickAt;
 
     public RoomActor(string roomId, string roomName, GameMap map, ServerMetrics metrics, IBattleResultStore battleResults)
     {
@@ -47,7 +62,32 @@ public sealed class RoomActor
 
     public RoomSummary ToSummary()
     {
-        return new RoomSummary(RoomId, RoomName, Map.Id, Map.Name, _players.Count, 4, _monsters.Values.Count(x => x.IsAlive), _battles.Count, _tick, CreatedAt);
+        var commandLatencySamples = Interlocked.Read(ref _commandLatencySamples);
+        var commandLatencyTotalTicks = Interlocked.Read(ref _commandLatencyTotalTicks);
+        var tickDelaySamples = Interlocked.Read(ref _tickDelaySamples);
+        var tickDelayTotalTicks = Interlocked.Read(ref _tickDelayTotalTicks);
+
+        return new RoomSummary(
+            RoomId,
+            RoomName,
+            Map.Id,
+            Map.Name,
+            _players.Count,
+            4,
+            _monsters.Values.Count(x => x.IsAlive),
+            _battles.Count,
+            Interlocked.Read(ref _tick),
+            CreatedAt,
+            Interlocked.Read(ref _acceptedMoves),
+            Interlocked.Read(ref _rejectedMoves),
+            new RejectedMoveReasonCounts(
+                Interlocked.Read(ref _rejectedTileOccupied),
+                Interlocked.Read(ref _rejectedSpeedHackDetected),
+                Interlocked.Read(ref _rejectedStaleSequence)),
+            AverageMilliseconds(commandLatencyTotalTicks, commandLatencySamples),
+            Milliseconds(Interlocked.Read(ref _maxCommandLatencyTicks)),
+            AverageMilliseconds(tickDelayTotalTicks, tickDelaySamples),
+            Milliseconds(Interlocked.Read(ref _maxTickDelayTicks)));
     }
 
     public ValueTask EnqueueAsync(RoomCommand command)
@@ -107,7 +147,7 @@ public sealed class RoomActor
             }
             finally
             {
-                _metrics.RecordCommandLatency(DateTimeOffset.UtcNow - startedAt);
+                RecordCommandLatency(DateTimeOffset.UtcNow - startedAt);
             }
         }
     }
@@ -158,16 +198,16 @@ public sealed class RoomActor
         if (!_players.TryGetValue(command.PlayerId, out var player)) return;
         if (command.Sequence <= player.LastSequence)
         {
-            _metrics.IncrementRejectedMove();
-            await player.SendJsonAsync(MoveRejected(command, "stale_sequence", player.Position), command.CancellationToken);
+            IncrementRejectedMove(StaleSequenceReason);
+            await player.SendJsonAsync(MoveRejected(command, StaleSequenceReason, player.Position), command.CancellationToken);
             return;
         }
 
         var now = DateTimeOffset.UtcNow;
         if (now - player.LastMoveAt < MoveCooldown)
         {
-            _metrics.IncrementRejectedMove();
-            await player.SendJsonAsync(MoveRejected(command, "speed_hack_detected", player.Position), command.CancellationToken);
+            IncrementRejectedMove(SpeedHackDetectedReason);
+            await player.SendJsonAsync(MoveRejected(command, SpeedHackDetectedReason, player.Position), command.CancellationToken);
             return;
         }
 
@@ -179,15 +219,15 @@ public sealed class RoomActor
 
         if (!Map.CanEnter(next))
         {
-            _metrics.IncrementRejectedMove();
+            IncrementRejectedMove("wall_collision");
             await player.SendJsonAsync(MoveRejected(command, "wall_collision", player.Position), command.CancellationToken);
             return;
         }
 
         if (occupied.Contains(next))
         {
-            _metrics.IncrementRejectedMove();
-            await player.SendJsonAsync(MoveRejected(command, "tile_occupied", player.Position), command.CancellationToken);
+            IncrementRejectedMove(TileOccupiedReason);
+            await player.SendJsonAsync(MoveRejected(command, TileOccupiedReason, player.Position), command.CancellationToken);
             return;
         }
 
@@ -196,7 +236,7 @@ public sealed class RoomActor
         player.LastSequence = command.Sequence;
         player.LastMoveAt = now;
         _snapshotDirty = true;
-        _metrics.IncrementAcceptedMove();
+        IncrementAcceptedMove();
 
         await BroadcastAsync(new ServerEnvelope("player_moved", new
         {
@@ -271,10 +311,59 @@ public sealed class RoomActor
 
     private async Task HandleTickAsync()
     {
-        _tick++;
+        var now = DateTimeOffset.UtcNow;
+        if (_lastTickAt is { } lastTickAt)
+        {
+            RecordTickDelay(now - lastTickAt - TickInterval);
+        }
+
+        _lastTickAt = now;
+        Interlocked.Increment(ref _tick);
         _metrics.IncrementTick();
         UpdateMonsterAi();
         await SendSnapshotAsync(force: false);
+    }
+
+    private void IncrementAcceptedMove()
+    {
+        Interlocked.Increment(ref _acceptedMoves);
+        _metrics.IncrementAcceptedMove();
+    }
+
+    private void IncrementRejectedMove(string reason)
+    {
+        Interlocked.Increment(ref _rejectedMoves);
+        switch (reason)
+        {
+            case TileOccupiedReason:
+                Interlocked.Increment(ref _rejectedTileOccupied);
+                break;
+            case SpeedHackDetectedReason:
+                Interlocked.Increment(ref _rejectedSpeedHackDetected);
+                break;
+            case StaleSequenceReason:
+                Interlocked.Increment(ref _rejectedStaleSequence);
+                break;
+        }
+
+        _metrics.IncrementRejectedMove(reason);
+    }
+
+    private void RecordCommandLatency(TimeSpan latency)
+    {
+        Interlocked.Add(ref _commandLatencyTotalTicks, latency.Ticks);
+        Interlocked.Increment(ref _commandLatencySamples);
+        SetMax(ref _maxCommandLatencyTicks, latency.Ticks);
+        _metrics.RecordCommandLatency(latency);
+    }
+
+    private void RecordTickDelay(TimeSpan delay)
+    {
+        var ticks = Math.Max(0, delay.Ticks);
+        Interlocked.Add(ref _tickDelayTotalTicks, ticks);
+        Interlocked.Increment(ref _tickDelaySamples);
+        SetMax(ref _maxTickDelayTicks, ticks);
+        _metrics.RecordTickDelay(TimeSpan.FromTicks(ticks));
     }
 
     private async Task SendSnapshotAsync(bool force)
@@ -438,6 +527,27 @@ public sealed class RoomActor
     private static int Distance(Position a, Position b)
     {
         return Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+    }
+
+    private static double AverageMilliseconds(long totalTicks, long samples)
+    {
+        return samples == 0 ? 0 : Milliseconds(totalTicks / samples);
+    }
+
+    private static double Milliseconds(long ticks)
+    {
+        return Math.Round(TimeSpan.FromTicks(ticks).TotalMilliseconds, 3);
+    }
+
+    private static void SetMax(ref long target, long value)
+    {
+        var current = Interlocked.Read(ref target);
+        while (value > current)
+        {
+            var original = Interlocked.CompareExchange(ref target, value, current);
+            if (original == current) return;
+            current = original;
+        }
     }
 
     private static Position StepToward(Position from, Position to)

@@ -2190,6 +2190,7 @@ async function renderAdminMetrics() {
   try {
     const metrics = await fetchJson(`${apiBase}/api/admin/metrics`);
     const totals = metrics.totals || {};
+    const reasons = totals.rejectedMoveReasons || {};
     const rooms = metrics.rooms || [];
     adminMetricsEl.innerHTML = `
       <div class="metric-grid">
@@ -2197,16 +2198,27 @@ async function renderAdminMetrics() {
         <div><b>${rooms.reduce((sum, room) => sum + (room.playerCount || 0), 0)}</b><span>접속자</span></div>
         <div><b>${totals.acceptedMoves || 0}</b><span>승인 이동</span></div>
         <div><b>${totals.rejectedMoves || 0}</b><span>거부 이동</span></div>
+        <div><b>${reasons.tile_occupied || 0}</b><span>타일 점유</span></div>
+        <div><b>${reasons.speed_hack_detected || 0}</b><span>속도 감지</span></div>
+        <div><b>${reasons.stale_sequence || 0}</b><span>오래된 순번</span></div>
         <div><b>${totals.activeBattles || 0}</b><span>전투 중</span></div>
         <div><b>${totals.averageCommandLatencyMs || 0}ms</b><span>평균 지연</span></div>
+        <div><b>${totals.maxCommandLatencyMs || 0}ms</b><span>최대 지연</span></div>
+        <div><b>${totals.averageTickDelayMs || 0}ms</b><span>평균 tick delay</span></div>
+        <div><b>${totals.maxTickDelayMs || 0}ms</b><span>최대 tick delay</span></div>
       </div>
       <div class="room-admin-list">
-        ${rooms.map(room => `
+        ${rooms.map(room => {
+          const roomReasons = room.rejectedMoveReasons || {};
+          return `
           <div class="room-card">
             <div class="room-title">${room.roomName}</div>
             <div class="room-meta">${room.mapName} · ${room.playerCount}/${room.maxPlayers}명 · 몬스터 ${room.monsterCount ?? 0} · 전투 ${room.activeBattleCount ?? 0} · tick ${room.serverTick}</div>
+            <div class="room-meta">이동 ${room.acceptedMoves ?? 0}/${room.rejectedMoves ?? 0} · tile ${roomReasons.tile_occupied ?? 0} · speed ${roomReasons.speed_hack_detected ?? 0} · stale ${roomReasons.stale_sequence ?? 0}</div>
+            <div class="room-meta">command avg ${room.averageCommandLatencyMs ?? 0}ms · max ${room.maxCommandLatencyMs ?? 0}ms · tick delay avg ${room.averageTickDelayMs ?? 0}ms · max ${room.maxTickDelayMs ?? 0}ms</div>
           </div>
-        `).join("") || `<div class="room-card"><div class="room-meta">운영 중인 방이 없습니다.</div></div>`}
+        `;
+        }).join("") || `<div class="room-card"><div class="room-meta">운영 중인 방이 없습니다.</div></div>`}
       </div>
     `;
     setStatus("");
