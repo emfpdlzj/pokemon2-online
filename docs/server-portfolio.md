@@ -14,6 +14,7 @@
 - Room Actor + Command Queue
 - 20Hz Tick Loop
 - 서버 권위형 이동 판정
+- 서버 권위형 전투 판정과 결과 저장
 - 부하 테스트용 C# WebSocket 봇 클라이언트
 
 ## 서버 구조
@@ -40,6 +41,8 @@ RoomActor per room
   - 20Hz tick loop
   - collision validation
   - movement rate limit
+  - authoritative battle rules
+  - battle result persistence
   - snapshot broadcast
   - room-level metrics
 ```
@@ -250,9 +253,7 @@ averageCommandLatencyMs=0.025
 
 ## 다음 구현 후보
 
-- 기존 `pokemon-demo` Canvas 클라이언트에 WebSocket 실시간 위치 어댑터 연결
 - LLM 대화 API 서버 프록시화
-- 전투 상태 머신 서버화
 - DB 저장 확장: 계정, 캐릭터, 방 기록
 - 운영툴 UI: 방 목록, 접속자, 강제 퇴장, 메트릭 그래프
 - 부하 테스트 결과를 CSV로 저장하고 그래프화

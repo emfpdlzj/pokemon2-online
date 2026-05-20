@@ -10,6 +10,8 @@ const {
   saveGame,
   updateHUD,
   sendBattleEvent,
+  sendServerAttack,
+  getNearestServerMonster,
 } = game;
 
 // ============================================================
@@ -43,6 +45,10 @@ const battleState = {
   pendingAlly: null,
   ally: null,
   remoteOffer: null,
+  serverAuthoritative: false,
+  monsterId: null,
+  serverBattleEnded: false,
+  awaitingServerResult: false,
 };
 
 // ── DOM ──
@@ -93,6 +99,10 @@ function startBattle(enemyData, onEnd, options = {}) {
   battleState.pendingAlly = null;
   battleState.ally = options.ally || null;
   battleState.remoteOffer = null;
+  battleState.serverAuthoritative = Boolean(options.serverAuthoritative);
+  battleState.monsterId = options.monsterId || enemyData.monsterId || null;
+  battleState.serverBattleEnded = false;
+  battleState.awaitingServerResult = false;
 
   state.phase = "battle";
   battleScreen.style.display = "flex";
@@ -101,7 +111,11 @@ function startBattle(enemyData, onEnd, options = {}) {
   setButtons(false);
 
   const introText = battleState.enemy.battleIntro || `야생의 ${battleState.enemy.name}이(가) 나타났다!`;
-  if (battleState.role === "host") {
+  if (battleState.serverAuthoritative) {
+    printLog(introText, () => {
+      printLog(`${battleState.player.name}, 싸워라!`, startPlayerTurn);
+    });
+  } else if (battleState.role === "host") {
     broadcastBattleEvent("started", {
       enemy: sanitizeBattleMonster(battleState.enemy),
       hostName: state.playerName,
@@ -257,6 +271,10 @@ function drawStatusPanel(ctx, mon, x, y, w, isPlayer) {
 function playerAttack() {
   if (!canActInBattle()) return;
   setButtons(false);
+  if (battleState.serverAuthoritative) {
+    requestServerAttack("basic");
+    return;
+  }
   const dmg = calcDamage(battleState.player.attack);
   battleState.enemy.hp = Math.max(0, battleState.enemy.hp - dmg);
   shake("enemy");
@@ -270,6 +288,10 @@ function playerSkill() {
   if (!canActInBattle()) return;
   if (battleState.skillUsesLeft <= 0) return;
   setButtons(false);
+  if (battleState.serverAuthoritative) {
+    requestServerAttack("ember");
+    return;
+  }
   battleState.skillUsesLeft -= 1;
   updateSkillButtonLabel();
   const dmg = calcDamage(battleState.player.attack * 1.8) | 0;
@@ -283,6 +305,10 @@ function playerSkill() {
 
 function playerRun() {
   if (!battleState.active || battleState.role !== "host") return;
+  if (battleState.serverAuthoritative) {
+    printLog("서버 전투에서는 도망칠 수 없습니다.", () => setButtons(true));
+    return;
+  }
   setButtons(false);
   printLog("도망쳤다!", () => endBattle(null));
 }
@@ -290,6 +316,10 @@ function playerRun() {
 function playerTeamAttack() {
   if (!canActInBattle() || !battleState.ally) return;
   setButtons(false);
+  if (battleState.serverAuthoritative) {
+    requestServerAttack("basic");
+    return;
+  }
   const dmg = calcDamage(battleState.player.attack + Math.floor(battleState.ally.attack * 0.8));
   battleState.enemy.hp = Math.max(0, battleState.enemy.hp - dmg);
   shake("enemy");
@@ -300,6 +330,10 @@ function playerTeamAttack() {
 }
 
 function enemyTurn() {
+  if (battleState.serverAuthoritative) {
+    startPlayerTurn();
+    return;
+  }
   const dmg = calcDamage(battleState.enemy.attack);
   battleState.player.hp = Math.max(0, battleState.player.hp - dmg);
   shake("player");
@@ -317,6 +351,21 @@ function startPlayerTurn() {
     return;
   }
   setButtons(true);
+}
+
+function requestServerAttack(skillId) {
+  battleState.playerTurn = false;
+  battleState.awaitingServerResult = true;
+  const sent = typeof sendServerAttack === "function" && sendServerAttack(battleState.monsterId, skillId);
+  if (!sent) {
+    printLog("서버와 연결되어 있지 않습니다.", () => {
+      battleState.awaitingServerResult = false;
+      battleState.playerTurn = true;
+      setButtons(true);
+    });
+    return;
+  }
+  printLog("서버 판정을 기다리는 중...");
 }
 
 function calcDamage(base) {
@@ -406,6 +455,104 @@ function setButtons(enabled) {
 
 function updateSkillButtonLabel() {
   bBtnSkill.textContent = `✨ 필살기 ${battleState.skillUsesLeft}/${MAX_SKILL_USES}`;
+}
+
+function toServerMonster(monster, battle) {
+  if (!monster && !battle) return null;
+  return {
+    monsterId: monster?.monsterId || battle?.monsterId || null,
+    name: monster?.name || "서버 몬스터",
+    hp: battle?.monsterHp ?? monster?.hp ?? 1,
+    maxHp: monster?.maxHp || Math.max(1, battle?.monsterHp || 1),
+    attack: 0,
+    color: monster?.isAlive === false ? "#667080" : "#7CFC00",
+    emoji: "⚔",
+    expReward: 0,
+    battleIntro: `${monster?.name || "서버 몬스터"}와 서버 권위 전투가 시작됐다!`,
+  };
+}
+
+function syncServerBattle(battle, monster) {
+  if (!battle?.active) return;
+  if (!battleState.active) {
+    startBattle(toServerMonster(monster, battle), null, {
+      role: "host",
+      battleId: battle.battleId,
+      monsterId: battle.monsterId,
+      serverAuthoritative: true,
+    });
+  }
+
+  if (battleState.battleId !== battle.battleId) return;
+  battleState.serverAuthoritative = true;
+  battleState.monsterId = battle.monsterId;
+  battleState.player.hp = battle.playerHp;
+  battleState.player.maxHp = Math.max(battleState.player.maxHp, battle.playerHp);
+  battleState.player.mp = battle.playerMp;
+  battleState.enemy = {
+    ...battleState.enemy,
+    ...toServerMonster(monster, battle),
+    hp: battle.monsterHp,
+  };
+  if (!battleState.serverBattleEnded && !battleState.awaitingServerResult && !battleState.playerTurn) {
+    battleState.playerTurn = true;
+    setButtons(true);
+  }
+}
+
+function handleServerBattleResult(payload) {
+  if (!payload) return;
+  if (!battleState.active || battleState.battleId !== payload.battleId) {
+    startBattle(toServerMonster({ monsterId: payload.monsterId, name: "서버 몬스터", hp: payload.monsterHp, maxHp: payload.monsterHp }, {
+      battleId: payload.battleId,
+      monsterId: payload.monsterId,
+      monsterHp: payload.monsterHp,
+    }), null, {
+      role: "host",
+      battleId: payload.battleId,
+      monsterId: payload.monsterId,
+      serverAuthoritative: true,
+    });
+  }
+
+  battleState.serverAuthoritative = true;
+  battleState.battleId = payload.battleId;
+  battleState.monsterId = payload.monsterId;
+  battleState.enemy.hp = payload.monsterHp;
+  battleState.player.hp = payload.playerHp;
+  battleState.player.mp = payload.playerMp;
+  battleState.skillUsesLeft = Math.max(0, Math.ceil((payload.playerMp || 0) / 5));
+  battleState.playerTurn = false;
+  battleState.awaitingServerResult = false;
+  updateSkillButtonLabel();
+  shake("enemy");
+  const skillName = payload.skillName || "공격";
+  const suffix = payload.won ? " 서버가 승리를 확정했다!" : ` 남은 HP ${payload.monsterHp}.`;
+  printLog(`${skillName} 승인: ${payload.damage} 데미지.${suffix}`, () => {
+    if (!payload.won && battleState.active) {
+      battleState.playerTurn = true;
+      setButtons(true);
+    }
+  });
+}
+
+function handleServerAttackRejected(payload) {
+  if (!battleState.active) return;
+  const reason = payload?.reason || "unknown";
+  battleState.awaitingServerResult = false;
+  battleState.playerTurn = true;
+  printLog(`공격 거부: ${reason}`, () => setButtons(true));
+}
+
+function handleServerBattleEnded(payload) {
+  if (!payload) return;
+  if (!battleState.active || battleState.battleId !== payload.battleId) return;
+  battleState.serverBattleEnded = true;
+  battleState.awaitingServerResult = false;
+  battleState.active = false;
+  hideBattleWaitingPanel();
+  const won = Boolean(payload.won);
+  printLog(won ? "서버 판정: 승리!" : "서버 판정: 패배.", () => finalizeBattleEnd(won));
 }
 
 // ── 버튼 이벤트 ──
@@ -580,6 +727,21 @@ function handleBattleEvent(senderId, payload) {
 //  외부에서 전투 시작하는 헬퍼
 // ============================================================
 function startWildBattle(onEnd) {
+  if (state.mode === "multi" && typeof getNearestServerMonster === "function") {
+    const monster = getNearestServerMonster();
+    if (monster) {
+      startBattle(toServerMonster(monster, {
+        monsterId: monster.monsterId,
+        monsterHp: monster.hp,
+      }), onEnd, {
+        role: "host",
+        monsterId: monster.monsterId,
+        serverAuthoritative: true,
+      });
+      return;
+    }
+  }
+
   const mon = WILD_MONSTERS[Math.floor(Math.random() * WILD_MONSTERS.length)];
   startBattle({ ...mon }, onEnd);
 }
@@ -594,5 +756,9 @@ return {
   startWildBattle,
   startTrainerBattle,
   handleBattleEvent,
+  syncServerBattle,
+  handleServerBattleResult,
+  handleServerAttackRejected,
+  handleServerBattleEnded,
 };
 }

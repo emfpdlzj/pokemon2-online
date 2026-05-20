@@ -345,6 +345,12 @@ const multiplayer = {
   socket: null,
   playerId: null,
   moveSequence: 0,
+  battleSequence: 0,
+  players: new Map(),
+  monsters: new Map(),
+  battles: new Map(),
+  serverTick: 0,
+  lastRejectReason: "",
 };
 
 let battleRuntime = null;
@@ -366,6 +372,36 @@ function startTrainerBattle(trainerId, onEnd) {
 function handleBattleEvent(senderId, payload) {
   if (!battleRuntime) return;
   return battleRuntime.handleBattleEvent(senderId, payload);
+}
+
+function handleServerBattleResult(payload) {
+  if (!battleRuntime) return;
+  return battleRuntime.handleServerBattleResult(payload);
+}
+
+function handleServerAttackRejected(payload) {
+  if (!battleRuntime) return;
+  return battleRuntime.handleServerAttackRejected(payload);
+}
+
+function handleServerBattleEnded(payload) {
+  if (!battleRuntime) return;
+  return battleRuntime.handleServerBattleEnded(payload);
+}
+
+function getNearestServerMonster() {
+  if (state.mode !== "multi") return null;
+  let nearest = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  multiplayer.monsters.forEach(monster => {
+    if (monster.isAlive === false || !monster.position) return;
+    const distance = Math.abs(monster.position.x - state.px) + Math.abs(monster.position.y - state.py);
+    if (distance < nearestDistance) {
+      nearest = monster;
+      nearestDistance = distance;
+    }
+  });
+  return nearest;
 }
 
 // ============================================================
@@ -859,6 +895,52 @@ function drawHero(ctx, px, py) {
   ctx.fillRect(px+14,py+3,4,3);
 }
 
+function drawRemotePlayer(ctx, sx, sy, player) {
+  const previousDir = playerDir;
+  playerDir = String(player.facing || "down").toLowerCase();
+  drawHero(ctx, sx, sy);
+  playerDir = previousDir;
+
+  const label = player.name || "player";
+  ctx.fillStyle = "rgba(20,40,90,0.72)";
+  ctx.font = "9px 'Courier New'";
+  const lw = ctx.measureText(label).width + 8;
+  ctx.fillRect(sx + TILE / 2 - lw / 2, sy - 15, lw, 12);
+  ctx.fillStyle = "#d9e7ff";
+  ctx.textAlign = "center";
+  ctx.fillText(label, sx + TILE / 2, sy - 6);
+}
+
+function drawServerMonster(ctx, sx, sy, monster) {
+  const ratio = Math.max(0, Math.min(1, (monster.hp || 0) / Math.max(1, monster.maxHp || 1)));
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.beginPath();
+  ctx.ellipse(sx + TILE / 2, sy + TILE - 4, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = monster.isAlive === false ? "#667080" : "#7CFC00";
+  ctx.fillRect(sx + 8, sy + 10, 16, 15);
+  ctx.fillStyle = monster.isAlive === false ? "#4c5563" : "#52b84a";
+  ctx.fillRect(sx + 10, sy + 5, 12, 10);
+  ctx.fillStyle = "#1a1a2e";
+  ctx.fillRect(sx + 12, sy + 8, 2, 2);
+  ctx.fillRect(sx + 18, sy + 8, 2, 2);
+
+  const label = monster.name || monster.monsterId || "monster";
+  ctx.fillStyle = "rgba(0,0,0,0.68)";
+  ctx.font = "9px 'Courier New'";
+  const lw = ctx.measureText(label).width + 8;
+  ctx.fillRect(sx + TILE / 2 - lw / 2, sy - 23, lw, 12);
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.fillText(label, sx + TILE / 2, sy - 14);
+
+  ctx.fillStyle = "#2d3550";
+  ctx.fillRect(sx + 4, sy - 8, TILE - 8, 5);
+  ctx.fillStyle = ratio > 0.5 ? "#44dd44" : ratio > 0.25 ? "#dddd00" : "#dd2222";
+  ctx.fillRect(sx + 4, sy - 8, (TILE - 8) * ratio, 5);
+}
+
 function drawProfessor(ctx, sx, sy) {
   const T = TILE;
   ctx.fillStyle = "rgba(0,0,0,0.18)";
@@ -1268,6 +1350,22 @@ function drawMap(ts = performance.now()) {
       ctx.fillText(hint, sx + TILE/2, sy - 17);
     }
   });
+
+  if (state.mode === "multi") {
+    multiplayer.monsters.forEach(monster => {
+      if (monster.isAlive === false) return;
+      const sx = monster.position.x * TILE - camX;
+      const sy = monster.position.y * TILE - camY;
+      drawServerMonster(ctx, sx, sy, monster);
+    });
+
+    multiplayer.players.forEach(player => {
+      if (player.playerId === multiplayer.playerId) return;
+      const sx = player.position.x * TILE - camX;
+      const sy = player.position.y * TILE - camY;
+      drawRemotePlayer(ctx, sx, sy, player);
+    });
+  }
 
   // 플레이어 (보간 좌표 사용)
   const px = renderX - camX;
@@ -1835,6 +1933,12 @@ function connectMultiplayer(wsUrl) {
   multiplayer.socket = socket;
   multiplayer.playerId = null;
   multiplayer.moveSequence = 0;
+  multiplayer.battleSequence = 0;
+  multiplayer.players = new Map();
+  multiplayer.monsters = new Map();
+  multiplayer.battles = new Map();
+  multiplayer.serverTick = 0;
+  multiplayer.lastRejectReason = "";
 
   socket.addEventListener("message", event => {
     let envelope;
@@ -1846,6 +1950,36 @@ function connectMultiplayer(wsUrl) {
 
     if (envelope.type === "joined") {
       multiplayer.playerId = envelope.payload?.playerId || null;
+      return;
+    }
+
+    if (envelope.type === "snapshot") {
+      applyServerSnapshot(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "player_moved") {
+      applyServerPlayerMoved(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "move_rejected") {
+      applyMoveRejected(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "battle_result") {
+      handleServerBattleResult(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "attack_rejected") {
+      handleServerAttackRejected(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "battle_ended") {
+      handleServerBattleEnded(envelope.payload);
       return;
     }
 
@@ -1870,6 +2004,9 @@ function disconnectMultiplayer() {
   }
   multiplayer.socket = null;
   multiplayer.playerId = null;
+  multiplayer.players = new Map();
+  multiplayer.monsters = new Map();
+  multiplayer.battles = new Map();
 }
 
 function sendMultiplayer(type, payload) {
@@ -1892,6 +2029,63 @@ function sendMultiplayerMove() {
     direction: playerDir,
     sequence: multiplayer.moveSequence,
   }));
+}
+
+function applyServerSnapshot(snapshot) {
+  if (!snapshot) return;
+  multiplayer.serverTick = snapshot.serverTick || multiplayer.serverTick;
+  multiplayer.players = new Map((snapshot.players || []).map(player => [player.playerId, player]));
+  multiplayer.monsters = new Map((snapshot.monsters || []).map(monster => [monster.monsterId, monster]));
+  multiplayer.battles = new Map((snapshot.battles || []).map(battle => [battle.battleId, battle]));
+
+  const me = multiplayer.playerId ? multiplayer.players.get(multiplayer.playerId) : null;
+  if (me?.position && !moveState.active) {
+    state.px = me.position.x;
+    state.py = me.position.y;
+    renderX = state.px * TILE;
+    renderY = state.py * TILE;
+    playerDir = String(me.facing || playerDir).toLowerCase();
+  }
+
+  const myBattle = [...multiplayer.battles.values()].find(battle => battle.playerId === multiplayer.playerId && battle.active);
+  if (myBattle && battleRuntime) {
+    const monster = multiplayer.monsters.get(myBattle.monsterId);
+    battleRuntime.syncServerBattle(myBattle, monster);
+  }
+}
+
+function applyServerPlayerMoved(payload) {
+  if (!payload?.playerId) return;
+  const current = multiplayer.players.get(payload.playerId) || { playerId: payload.playerId };
+  multiplayer.players.set(payload.playerId, {
+    ...current,
+    position: payload.position || current.position,
+    facing: payload.facing || current.facing,
+  });
+}
+
+function applyMoveRejected(payload) {
+  multiplayer.lastRejectReason = payload?.reason || "";
+  if (!payload?.serverPosition) return;
+  state.px = payload.serverPosition.x;
+  state.py = payload.serverPosition.y;
+  renderX = state.px * TILE;
+  renderY = state.py * TILE;
+  moveState.active = false;
+  moveState.arrived = false;
+}
+
+function sendServerAttack(monsterId, skillId) {
+  const socket = multiplayer.socket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  multiplayer.battleSequence += 1;
+  socket.send(JSON.stringify({
+    type: "attack",
+    monsterId,
+    skillId,
+    sequence: multiplayer.battleSequence,
+  }));
+  return true;
 }
 
 // ============================================================
@@ -2139,6 +2333,8 @@ return {
   saveGame,
   updateHUD,
   sendBattleEvent,
+  sendServerAttack,
+  getNearestServerMonster,
   setBattleRuntime,
 };
 }
