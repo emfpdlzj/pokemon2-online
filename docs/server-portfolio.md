@@ -223,6 +223,14 @@ dotnet server/Pokemon2.Server/bin/Debug/net10.0/Pokemon2.Server.dll --urls http:
 
 게임 도메인 검증은 C# `Pokemon2.LoadTest`가 담당한다. 이 테스트는 `player_moved`, `move_rejected` 응답을 직접 파싱해 이동 승인/거부와 RTT를 기록한다.
 
+```bash
+dotnet run --project server/Pokemon2.LoadTest/Pokemon2.LoadTest.csproj -- --scenario=collision
+dotnet run --project server/Pokemon2.LoadTest/Pokemon2.LoadTest.csproj -- --scenario=sync-pace
+```
+
+- `collision`: 중앙 스폰 타일을 점유한 anchor를 두고 주변 collider 3명이 동시에 중앙으로 이동해 `tile_occupied`를 재현한다.
+- `sync-pace`: fast/normal/slow 클라이언트가 서로 다른 입력 주기로 이동하고 중복 sequence를 보내 `speed_hack_detected`, `stale_sequence`를 분리 집계한다.
+
 오픈소스 부하 리포트는 Artillery가 담당한다. `load-tests/artillery`에는 두 가지 WebSocket 시나리오가 있다.
 
 ```bash
