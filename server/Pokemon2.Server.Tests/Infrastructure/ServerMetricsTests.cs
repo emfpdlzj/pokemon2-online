@@ -35,6 +35,7 @@ public sealed class ServerMetricsTests
 
     private static JsonNode ToNode(object value)
     {
-        return JsonSerializer.SerializeToNode(value) ?? throw new JsonException("Snapshot did not serialize.");
+        return JsonSerializer.SerializeToNode(value, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? throw new JsonException("Snapshot did not serialize.");
     }
 }

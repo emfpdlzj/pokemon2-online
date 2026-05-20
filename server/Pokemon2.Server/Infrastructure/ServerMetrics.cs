@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Pokemon2.Server.Infrastructure;
 
 public sealed class ServerMetrics
@@ -50,7 +52,7 @@ public sealed class ServerMetrics
         SetMax(ref _maxTickDelayTicks, ticks);
     }
 
-    public object GetSnapshot()
+    public ServerMetricsSnapshot GetSnapshot()
     {
         var avgCommandLatencyMs = GetAverageMilliseconds(
             Interlocked.Read(ref _commandLatencyTotalTicks),
@@ -59,27 +61,23 @@ public sealed class ServerMetrics
             Interlocked.Read(ref _tickDelayTotalTicks),
             Interlocked.Read(ref _tickDelaySamples));
 
-        return new
-        {
-            roomsCreated = Interlocked.Read(ref _roomsCreated),
-            joined = Interlocked.Read(ref _joined),
-            left = Interlocked.Read(ref _left),
-            acceptedMoves = Interlocked.Read(ref _acceptedMoves),
-            rejectedMoves = Interlocked.Read(ref _rejectedMoves),
-            rejectedMoveReasons = new
-            {
-                tile_occupied = Interlocked.Read(ref _rejectedTileOccupied),
-                speed_hack_detected = Interlocked.Read(ref _rejectedSpeedHackDetected),
-                stale_sequence = Interlocked.Read(ref _rejectedStaleSequence)
-            },
-            ticks = Interlocked.Read(ref _ticks),
-            activeBattles = Interlocked.Read(ref _activeBattles),
-            completedBattles = Interlocked.Read(ref _completedBattles),
-            averageCommandLatencyMs = avgCommandLatencyMs,
-            maxCommandLatencyMs = Milliseconds(Interlocked.Read(ref _maxCommandLatencyTicks)),
-            averageTickDelayMs = avgTickDelayMs,
-            maxTickDelayMs = Milliseconds(Interlocked.Read(ref _maxTickDelayTicks))
-        };
+        return new ServerMetricsSnapshot(
+            Interlocked.Read(ref _roomsCreated),
+            Interlocked.Read(ref _joined),
+            Interlocked.Read(ref _left),
+            Interlocked.Read(ref _acceptedMoves),
+            Interlocked.Read(ref _rejectedMoves),
+            new ServerRejectedMoveReasonCounts(
+                Interlocked.Read(ref _rejectedTileOccupied),
+                Interlocked.Read(ref _rejectedSpeedHackDetected),
+                Interlocked.Read(ref _rejectedStaleSequence)),
+            Interlocked.Read(ref _ticks),
+            Interlocked.Read(ref _activeBattles),
+            Interlocked.Read(ref _completedBattles),
+            avgCommandLatencyMs,
+            Milliseconds(Interlocked.Read(ref _maxCommandLatencyTicks)),
+            avgTickDelayMs,
+            Milliseconds(Interlocked.Read(ref _maxTickDelayTicks)));
     }
 
     private void IncrementRejectedReason(string reason)
@@ -119,3 +117,26 @@ public sealed class ServerMetrics
         }
     }
 }
+
+public sealed record ServerMetricsSnapshot(
+    long RoomsCreated,
+    long Joined,
+    long Left,
+    long AcceptedMoves,
+    long RejectedMoves,
+    ServerRejectedMoveReasonCounts RejectedMoveReasons,
+    long Ticks,
+    long ActiveBattles,
+    long CompletedBattles,
+    double AverageCommandLatencyMs,
+    double MaxCommandLatencyMs,
+    double AverageTickDelayMs,
+    double MaxTickDelayMs);
+
+public sealed record ServerRejectedMoveReasonCounts(
+    [property: JsonPropertyName("tile_occupied")]
+    long TileOccupied,
+    [property: JsonPropertyName("speed_hack_detected")]
+    long SpeedHackDetected,
+    [property: JsonPropertyName("stale_sequence")]
+    long StaleSequence);
