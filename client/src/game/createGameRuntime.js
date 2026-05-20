@@ -390,8 +390,10 @@ const menuStatus = document.getElementById("menu-status");
 const saveMenuPanel = document.getElementById("save-menu-panel");
 const multiMenuPanel = document.getElementById("multi-menu-panel");
 const settingsPanel = document.getElementById("settings-panel");
+const adminPanel = document.getElementById("admin-panel");
 const saveSlotsEl = document.getElementById("save-slots");
 const roomListEl = document.getElementById("room-list");
+const adminMetricsEl = document.getElementById("admin-metrics");
 const serverUrlInput = document.getElementById("server-url-input");
 
 canvas.width  = CANVAS_W;
@@ -1919,7 +1921,7 @@ function gameLoop(ts) {
 //  시작 화면
 // ============================================================
 function setMenuPanel(panel) {
-  [saveMenuPanel, multiMenuPanel, settingsPanel].forEach(el => {
+  [saveMenuPanel, multiMenuPanel, settingsPanel, adminPanel].forEach(el => {
     el.style.display = el === panel ? "block" : "none";
   });
 }
@@ -2052,6 +2054,38 @@ async function renderRooms() {
   }
 }
 
+async function renderAdminMetrics() {
+  setMenuPanel(adminPanel);
+  setStatus("운영 지표를 불러오는 중...");
+  adminMetricsEl.innerHTML = "";
+  try {
+    const metrics = await fetchJson(`${apiBase}/api/admin/metrics`);
+    const totals = metrics.totals || {};
+    const rooms = metrics.rooms || [];
+    adminMetricsEl.innerHTML = `
+      <div class="metric-grid">
+        <div><b>${rooms.length}</b><span>방 수</span></div>
+        <div><b>${rooms.reduce((sum, room) => sum + (room.playerCount || 0), 0)}</b><span>접속자</span></div>
+        <div><b>${totals.acceptedMoves || 0}</b><span>승인 이동</span></div>
+        <div><b>${totals.rejectedMoves || 0}</b><span>거부 이동</span></div>
+        <div><b>${totals.activeBattles || 0}</b><span>전투 중</span></div>
+        <div><b>${totals.averageCommandLatencyMs || 0}ms</b><span>평균 지연</span></div>
+      </div>
+      <div class="room-admin-list">
+        ${rooms.map(room => `
+          <div class="room-card">
+            <div class="room-title">${room.roomName}</div>
+            <div class="room-meta">${room.mapName} · ${room.playerCount}/${room.maxPlayers}명 · 몬스터 ${room.monsterCount ?? 0} · 전투 ${room.activeBattleCount ?? 0} · tick ${room.serverTick}</div>
+          </div>
+        `).join("") || `<div class="room-card"><div class="room-meta">운영 중인 방이 없습니다.</div></div>`}
+      </div>
+    `;
+    setStatus("");
+  } catch {
+    setStatus("운영 지표를 불러오지 못했습니다.");
+  }
+}
+
 document.getElementById("single-btn").addEventListener("click", async () => {
   setStatus("싱글 세션을 준비하는 중...");
   try {
@@ -2062,6 +2096,7 @@ document.getElementById("single-btn").addEventListener("click", async () => {
 
 document.getElementById("saves-btn").addEventListener("click", renderSaveSlots);
 document.getElementById("multiplayer-btn").addEventListener("click", renderRooms);
+document.getElementById("admin-btn").addEventListener("click", renderAdminMetrics);
 document.getElementById("settings-btn").addEventListener("click", () => {
   setMenuPanel(settingsPanel);
   setStatus("");
@@ -2069,6 +2104,8 @@ document.getElementById("settings-btn").addEventListener("click", () => {
 document.getElementById("save-back-btn").addEventListener("click", () => setMenuPanel(null));
 document.getElementById("multi-back-btn").addEventListener("click", () => setMenuPanel(null));
 document.getElementById("settings-back-btn").addEventListener("click", () => setMenuPanel(null));
+document.getElementById("admin-back-btn").addEventListener("click", () => setMenuPanel(null));
+document.getElementById("refresh-admin-btn").addEventListener("click", renderAdminMetrics);
 document.getElementById("save-settings-btn").addEventListener("click", () => {
   apiBase = serverUrlInput.value.trim() || DEFAULT_API_BASE;
   localStorage.setItem(API_BASE_KEY, apiBase);

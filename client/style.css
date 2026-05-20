@@ -405,6 +405,32 @@ body {
   min-width: 160px;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.metric-grid div {
+  background: #151528;
+  border: 1px solid #3b3b5a;
+  padding: 10px;
+}
+.metric-grid b {
+  display: block;
+  color: #FFD700;
+  font-size: 1.1rem;
+  margin-bottom: 4px;
+}
+.metric-grid span {
+  color: #c8d0e8;
+  font-size: 0.75rem;
+}
+.room-admin-list {
+  max-height: 220px;
+  overflow: auto;
+}
+
 #fade-overlay {
   position: fixed;
   inset: 0;
