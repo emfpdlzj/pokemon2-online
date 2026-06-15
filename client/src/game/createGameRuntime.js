@@ -7,6 +7,12 @@ import {
   isReconnectableClose,
   parseHttpStatus,
 } from "./multiplayerStatus.js";
+import {
+  buildSaveEnvelope,
+  describeSaveResolution,
+  normalizeStoredSaveEnvelope,
+  resolveSaveConflict,
+} from "./saveSync.js";
 
 export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV || {} }) {
 const MAPS = maps;
@@ -277,6 +283,10 @@ const ctx         = canvas.getContext("2d");
 const hudEl       = document.getElementById("hud");
 const hudMap      = document.getElementById("hud-map");
 const hudStarter  = document.getElementById("hud-starter");
+const saveStatusBar = document.getElementById("save-status-bar");
+const saveStatusBadge = document.getElementById("save-status-badge");
+const saveStatusText = document.getElementById("save-status-text");
+const saveRetryBtn = document.getElementById("save-retry-btn");
 const dialogueBox = document.getElementById("dialogue-box");
 const dlgSpeaker  = document.getElementById("dialogue-speaker");
 const dlgText     = document.getElementById("dialogue-text");
@@ -310,6 +320,7 @@ const multiplayerReconnectBtn = document.getElementById("multiplayer-reconnect-b
 
 canvas.width  = CANVAS_W;
 canvas.height = CANVAS_H;
+updateSaveStatusView();
 
 // ============================================================
 //  대화 시스템
@@ -1850,6 +1861,15 @@ let activeSaveId = readSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode) || nu
 let activeSlotNumber = Number(readSaveContextValue(ACTIVE_SLOT_KEY, selectedSaveMode) || "1");
 let saveStartedAt = Date.now();
 let saveWriteTimer = null;
+const saveSync = {
+  state: "idle",
+  message: "서버 저장 상태를 아직 확인하지 않았습니다.",
+  lastLocalSaveAt: null,
+  lastServerSaveAt: null,
+  retryCount: 0,
+  retryTimer: null,
+  pendingPayload: null,
+};
 
 serverUrlInput.value = apiBase;
 
@@ -1865,8 +1885,22 @@ function resetState(playerName, mode = "single", roomId = null) {
   firedAutoEvents.clear();
 }
 
-function localSaveKey() {
-  return `pokemonDemo:${playerIdentity?.userId || "shared"}:${state.mode || "single"}:${activeSlotNumber}`;
+function localSaveKey(mode = state.mode || selectedSaveMode, slotNumber = activeSlotNumber) {
+  return `pokemonDemo:${playerIdentity?.userId || "shared"}:${normalizeSaveMode(mode)}:${slotNumber}`;
+}
+
+function readLocalSaveEnvelope(mode = state.mode || selectedSaveMode, slotNumber = activeSlotNumber) {
+  const raw = localStorage.getItem(localSaveKey(mode, slotNumber));
+  if (!raw) return null;
+  try {
+    return normalizeStoredSaveEnvelope(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalSaveEnvelope(mode, slotNumber, envelope) {
+  localStorage.setItem(localSaveKey(mode, slotNumber), JSON.stringify(envelope));
 }
 
 function normalizeSaveMode(mode) {
@@ -1921,6 +1955,38 @@ function setActiveSaveContext(mode, { slotNumber = null, saveId } = {}) {
   }
 
   activeSaveId = readSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode) || null;
+}
+
+function formatSaveTimestamp(value) {
+  if (!value) return "기록 없음";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "기록 없음" : date.toLocaleString();
+}
+
+function clearSaveRetryTimer() {
+  if (saveSync.retryTimer) {
+    clearTimeout(saveSync.retryTimer);
+    saveSync.retryTimer = null;
+  }
+}
+
+function updateSaveStatusView() {
+  saveStatusBadge.dataset.state = saveSync.state;
+  saveStatusBadge.textContent = ({
+    idle: "저장 대기",
+    saving: "저장 중",
+    synced: "동기화",
+    local: "임시 보관",
+    conflict: "충돌",
+    error: "오류",
+  })[saveSync.state] || "저장 대기";
+  saveStatusText.textContent = saveSync.message;
+  saveRetryBtn.disabled = !saveSync.pendingPayload;
+}
+
+function setSaveSyncState(next) {
+  Object.assign(saveSync, next);
+  updateSaveStatusView();
 }
 
 function readStoredPlayerIdentity() {
@@ -2018,26 +2084,119 @@ function buildSavePayload() {
   };
 }
 
+function persistLocalSaveEnvelope(payload, {
+  pendingSync,
+  savedAt = new Date().toISOString(),
+  serverUpdatedAt = null,
+  syncError = null,
+} = {}) {
+  const envelope = buildSaveEnvelope({
+    mode: payload.mode || "single",
+    slotNumber: payload.slotNumber || 1,
+    gameState: payload.gameState,
+    savedAt,
+    serverUpdatedAt,
+    pendingSync,
+    syncError,
+  });
+  writeLocalSaveEnvelope(payload.mode, payload.slotNumber, envelope);
+  localStorage.setItem("pokemonDemo", JSON.stringify(payload.gameState));
+  saveSync.lastLocalSaveAt = savedAt;
+  if (serverUpdatedAt) {
+    saveSync.lastServerSaveAt = serverUpdatedAt;
+  }
+}
+
+function scheduleSaveRetry(error) {
+  clearSaveRetryTimer();
+  if (!saveSync.pendingPayload) {
+    return;
+  }
+
+  const nextRetryCount = saveSync.retryCount + 1;
+  const delayMs = Math.min(15000, 2000 * (2 ** (nextRetryCount - 1)));
+  setSaveSyncState({
+    state: "local",
+    retryCount: nextRetryCount,
+    message: `서버 저장에 실패해 브라우저 임시본으로 유지 중입니다. ${Math.ceil(delayMs / 1000)}초 뒤 자동 재시도합니다. 마지막 서버 저장: ${formatSaveTimestamp(saveSync.lastServerSaveAt)}`,
+  });
+  saveSync.retryTimer = setTimeout(() => {
+    saveSync.retryTimer = null;
+    performSaveSync(saveSync.pendingPayload).catch(retryError => {
+      scheduleSaveRetry(retryError);
+    });
+  }, delayMs);
+}
+
+async function performSaveSync(payload) {
+  setSaveSyncState({
+    state: "saving",
+    pendingPayload: payload,
+    message: `서버 저장 중입니다. 로컬 임시 저장: ${formatSaveTimestamp(saveSync.lastLocalSaveAt)}`,
+  });
+
+  try {
+    const saved = await syncSaveToServer(payload);
+    clearSaveRetryTimer();
+    persistLocalSaveEnvelope(payload, {
+      pendingSync: false,
+      savedAt: saveSync.lastLocalSaveAt || new Date().toISOString(),
+      serverUpdatedAt: saved.updatedAt || new Date().toISOString(),
+      syncError: null,
+    });
+    setSaveSyncState({
+      state: "synced",
+      pendingPayload: null,
+      retryCount: 0,
+      message: `서버 저장 완료 · 마지막 서버 저장 ${formatSaveTimestamp(saved.updatedAt)}`,
+      lastServerSaveAt: saved.updatedAt || new Date().toISOString(),
+    });
+    return saved;
+  } catch (error) {
+    const existing = readLocalSaveEnvelope(payload.mode, payload.slotNumber);
+    persistLocalSaveEnvelope(payload, {
+      pendingSync: true,
+      savedAt: saveSync.lastLocalSaveAt || new Date().toISOString(),
+      serverUpdatedAt: existing?.serverUpdatedAt || saveSync.lastServerSaveAt,
+      syncError: error?.message || "save sync failed",
+    });
+    scheduleSaveRetry(error);
+    throw error;
+  }
+}
+
 function saveGame() {
   const payload = buildSavePayload();
-  localStorage.setItem(localSaveKey(), JSON.stringify(payload.gameState));
-  localStorage.setItem("pokemonDemo", JSON.stringify(payload.gameState));
+  persistLocalSaveEnvelope(payload, {
+    pendingSync: true,
+    savedAt: new Date().toISOString(),
+    serverUpdatedAt: readLocalSaveEnvelope(payload.mode, payload.slotNumber)?.serverUpdatedAt || saveSync.lastServerSaveAt,
+  });
+  saveSync.pendingPayload = payload;
 
   if (state.phase !== "game") return;
   if (saveWriteTimer) clearTimeout(saveWriteTimer);
   saveWriteTimer = setTimeout(() => {
-    syncSaveToServer(payload).catch(() => {});
+    performSaveSync(payload).catch(() => {});
   }, 450);
 }
 
-function loadGame() {
-  const raw = localStorage.getItem(localSaveKey()) || localStorage.getItem("pokemonDemo");
+function loadGame(mode = state.mode || selectedSaveMode, slotNumber = activeSlotNumber) {
+  const envelope = readLocalSaveEnvelope(mode, slotNumber);
+  if (envelope?.gameState) {
+    applySavedState(envelope.gameState);
+    return true;
+  }
+
+  const raw = localStorage.getItem("pokemonDemo");
   if (!raw) return false;
   try {
     const saved = JSON.parse(raw);
     applySavedState(saved);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function applySavedState(saved) {
@@ -2071,6 +2230,7 @@ async function syncSaveToServer(payload) {
   const saved = await res.json();
   activeSaveId = saved.id;
   writeSaveContextValue(ACTIVE_SAVE_KEY, state.mode || selectedSaveMode, activeSaveId);
+  return saved;
 }
 
 async function fetchJson(url, options, { requireIdentity = false } = {}) {
@@ -2428,30 +2588,144 @@ function renderMultiSlotPicker(saves) {
 
 function renderMultiSaveSummary(saves) {
   const selected = saves.find(save => save.slotNumber === activeSlotNumber);
+  const resolution = resolveSaveConflict({
+    localEnvelope: readLocalSaveEnvelope("multi", activeSlotNumber),
+    serverUpdatedAt: selected?.updatedAt || null,
+  });
   multiSaveSummaryEl.innerHTML = selected ? `
     <strong>현재 멀티 슬롯 ${activeSlotNumber}</strong><br>
     ${selected.playerName} · ${selected.currentMap} · ${selected.starter?.name || "파트너 없음"} Lv.${selected.starter?.level || "-"}<br>
-    방에 입장하면 이 슬롯 진행을 불러오고, 플레이 중 자동 저장도 같은 슬롯에 이어집니다.
+    방에 입장하면 이 슬롯 진행을 불러오고, 플레이 중 자동 저장도 같은 슬롯에 이어집니다.<br>
+    ${describeSaveResolution(resolution.state) || "서버 저장 기준으로 진행도를 복구합니다."}
   ` : `
     <strong>현재 멀티 슬롯 ${activeSlotNumber}</strong><br>
     아직 저장된 멀티 진행이 없습니다. 방에 입장하면 새 진행이 시작되고, 이후 같은 슬롯에 저장됩니다.
   `;
 }
 
-async function prepareMultiplayerSavedState() {
-  setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: activeSaveId });
-  if (!activeSaveId) {
-    return null;
+function formatSaveSyncNote(mode, slotNumber, serverUpdatedAt) {
+  const localEnvelope = readLocalSaveEnvelope(mode, slotNumber);
+  const resolution = resolveSaveConflict({ localEnvelope, serverUpdatedAt });
+  const note = describeSaveResolution(resolution.state);
+  return { localEnvelope, resolution, note };
+}
+
+function hydrateSaveStatusFromEnvelope(mode, slotNumber, serverUpdatedAt = null) {
+  const { localEnvelope, resolution } = formatSaveSyncNote(mode, slotNumber, serverUpdatedAt);
+  if (resolution.state === "local_newer") {
+    setSaveSyncState({
+      state: "conflict",
+      pendingPayload: localEnvelope ? buildSavePayloadFromGameState(localEnvelope.gameState, mode, slotNumber) : null,
+      message: "로컬 임시본이 서버 저장보다 최신이라 로컬 진행도를 우선 사용합니다. 다시 저장하면 서버에 덮어씁니다.",
+      lastLocalSaveAt: localEnvelope?.savedAt || saveSync.lastLocalSaveAt,
+      lastServerSaveAt: serverUpdatedAt || saveSync.lastServerSaveAt,
+    });
+    return;
   }
 
+  if (localEnvelope?.pendingSync) {
+    setSaveSyncState({
+      state: "local",
+      message: `서버 저장이 아직 완료되지 않았습니다. 마지막 로컬 저장 ${formatSaveTimestamp(localEnvelope.savedAt)} · 마지막 서버 저장 ${formatSaveTimestamp(localEnvelope.serverUpdatedAt)}`,
+      lastLocalSaveAt: localEnvelope.savedAt || saveSync.lastLocalSaveAt,
+      lastServerSaveAt: localEnvelope.serverUpdatedAt || saveSync.lastServerSaveAt,
+      pendingPayload: buildSavePayloadFromGameState(localEnvelope.gameState, mode, slotNumber),
+    });
+    return;
+  }
+
+  setSaveSyncState({
+    state: saveSync.lastServerSaveAt || serverUpdatedAt ? "synced" : "idle",
+    message: serverUpdatedAt
+      ? `서버 저장 기준으로 복구했습니다. 마지막 서버 저장 ${formatSaveTimestamp(serverUpdatedAt)}`
+      : "서버 저장 상태를 아직 확인하지 않았습니다.",
+    lastServerSaveAt: serverUpdatedAt || saveSync.lastServerSaveAt,
+    pendingPayload: null,
+    retryCount: 0,
+  });
+}
+
+function buildSavePayloadFromGameState(gameState, mode, slotNumber) {
+  const starter = normalizeStarter(gameState?.starter);
+  return {
+    slotNumber,
+    mode,
+    playerName: gameState?.playerName || "주인공",
+    currentMap: gameState?.currentMap || "hometown",
+    positionX: gameState?.px ?? 9,
+    positionY: gameState?.py ?? 9,
+    starter: starter ? {
+      id: starter.id,
+      name: starter.name,
+      level: starter.level,
+      currentHp: starter.currentHp,
+    } : null,
+    events: gameState?.events || {},
+    gameState,
+    playTimeSeconds: Math.floor((Date.now() - saveStartedAt) / 1000),
+  };
+}
+
+async function resolveSavedStateForSlot({ mode, slotNumber, saveId }) {
+  const localEnvelope = readLocalSaveEnvelope(mode, slotNumber);
+  if (!saveId) {
+    return {
+      saveId: null,
+      savedState: localEnvelope?.gameState || null,
+      resolution: resolveSaveConflict({ localEnvelope, serverUpdatedAt: null }),
+      serverUpdatedAt: null,
+    };
+  }
+
+  const detail = await fetchJson(`${apiBase}/api/saves/${saveId}`, undefined, { requireIdentity: true });
+  const resolution = resolveSaveConflict({ localEnvelope, serverUpdatedAt: detail.updatedAt });
+
+  if (resolution.preferredSource === "local" && localEnvelope?.gameState) {
+    return {
+      saveId: detail.id,
+      savedState: localEnvelope.gameState,
+      resolution,
+      serverUpdatedAt: detail.updatedAt,
+    };
+  }
+
+  if (detail.gameState) {
+    writeLocalSaveEnvelope(mode, slotNumber, buildSaveEnvelope({
+      mode,
+      slotNumber,
+      gameState: detail.gameState,
+      savedAt: detail.updatedAt,
+      serverUpdatedAt: detail.updatedAt,
+      pendingSync: false,
+      syncError: null,
+    }));
+  }
+
+  return {
+    saveId: detail.id,
+    savedState: detail.gameState,
+    resolution,
+    serverUpdatedAt: detail.updatedAt,
+  };
+}
+
+async function prepareMultiplayerSavedState() {
+  setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: activeSaveId });
   try {
-    const detail = await fetchJson(`${apiBase}/api/saves/${activeSaveId}`, undefined, { requireIdentity: true });
-    setActiveSaveContext("multi", { slotNumber: detail.slotNumber, saveId: detail.id });
-    return detail.gameState;
+    const resolved = await resolveSavedStateForSlot({
+      mode: "multi",
+      slotNumber: activeSlotNumber,
+      saveId: activeSaveId,
+    });
+    setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: resolved.saveId });
+    hydrateSaveStatusFromEnvelope("multi", activeSlotNumber, resolved.serverUpdatedAt);
+    return resolved.savedState;
   } catch (error) {
     if (parseHttpStatus(error) === 404) {
+      const localEnvelope = readLocalSaveEnvelope("multi", activeSlotNumber);
       setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: null });
-      return null;
+      hydrateSaveStatusFromEnvelope("multi", activeSlotNumber, null);
+      return localEnvelope?.gameState || null;
     }
 
     throw error;
@@ -2485,6 +2759,7 @@ function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState 
   renderX = state.px * TILE;
   renderY = state.py * TILE;
   updateHUD();
+  hydrateSaveStatusFromEnvelope(state.mode || mode, activeSlotNumber, readLocalSaveEnvelope(state.mode || mode, activeSlotNumber)?.serverUpdatedAt || saveSync.lastServerSaveAt);
   updateMultiplayerPanel();
   saveGame();
   requestAnimationFrame(gameLoop);
@@ -2510,10 +2785,11 @@ async function renderSaveSlots(mode = selectedSaveMode) {
     const bySlot = new Map(saves.map(save => [save.slotNumber, save]));
     for (let slot = 1; slot <= 3; slot++) {
       const save = bySlot.get(slot);
+      const resolutionNote = formatSaveSyncNote(selectedSaveMode, slot, save?.updatedAt || null);
       const button = document.createElement("button");
       button.className = "slot-card";
       button.type = "button";
-      button.innerHTML = formatSaveCardContent(save, slot, selectedSaveMode);
+      button.innerHTML = `${formatSaveCardContent(save, slot, selectedSaveMode)}${resolutionNote.note ? `<div class="slot-meta">${resolutionNote.note}</div>` : ""}`;
       button.onclick = async () => {
         setActiveSaveContext(selectedSaveMode, { slotNumber: slot, saveId: save?.id ?? null });
         if (selectedSaveMode === "multi") {
@@ -2525,12 +2801,24 @@ async function renderSaveSlots(mode = selectedSaveMode) {
         }
 
         if (!save) {
+          const localEnvelope = readLocalSaveEnvelope("single", slot);
+          if (localEnvelope?.gameState) {
+            hydrateSaveStatusFromEnvelope("single", slot, null);
+            beginGame({ mode: "single", slotNumber: slot, savedState: localEnvelope.gameState });
+            return;
+          }
+
           beginGame({ mode: "single", slotNumber: slot });
           return;
         }
 
-        const detail = await fetchJson(`${apiBase}/api/saves/${save.id}`, undefined, { requireIdentity: true });
-        beginGame({ mode: "single", slotNumber: slot, saveId: detail.id, savedState: detail.gameState });
+        const resolved = await resolveSavedStateForSlot({
+          mode: "single",
+          slotNumber: slot,
+          saveId: save.id,
+        });
+        hydrateSaveStatusFromEnvelope("single", slot, resolved.serverUpdatedAt);
+        beginGame({ mode: "single", slotNumber: slot, saveId: resolved.saveId, savedState: resolved.savedState });
       };
       saveSlotsEl.appendChild(button);
     }
@@ -2679,6 +2967,16 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
   apiBase = serverUrlInput.value.trim() || DEFAULT_API_BASE;
   localStorage.setItem(API_BASE_KEY, apiBase);
   setStatus("서버 주소를 저장했습니다.");
+});
+saveRetryBtn.addEventListener("click", async () => {
+  if (!saveSync.pendingPayload) return;
+  clearSaveRetryTimer();
+  saveSync.retryCount = 0;
+  try {
+    await performSaveSync(saveSync.pendingPayload);
+  } catch {
+    // performSaveSync already updated the UI and retry policy.
+  }
 });
 document.getElementById("create-room-btn").addEventListener("click", async () => {
   const roomName = document.getElementById("room-name-input").value.trim() || "모험 방";
