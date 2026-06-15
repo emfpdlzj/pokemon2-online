@@ -4,6 +4,9 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
+const string PlayerIdentityHeaderName = "X-Player-Identity";
+const string AdminTokenHeaderName = "X-Admin-Token";
+
 var config = LoadTestConfig.Parse(args);
 using var http = new HttpClient { BaseAddress = config.HttpBaseUri };
 
@@ -21,7 +24,7 @@ for (var i = 0; i < config.Rooms; i++)
 var stopwatch = Stopwatch.StartNew();
 var tasks = roomIds.SelectMany((roomId, roomIndex) =>
     Enumerable.Range(0, config.ClientsPerRoom)
-        .Select(clientIndex => RunClientAsync(config, roomId, roomIndex, clientIndex))).ToArray();
+        .Select(clientIndex => RunClientAsync(config, http, roomId, roomIndex, clientIndex))).ToArray();
 
 var results = await Task.WhenAll(tasks);
 stopwatch.Stop();
@@ -57,16 +60,42 @@ foreach (var group in results.GroupBy(result => result.Profile).OrderBy(group =>
     Console.WriteLine($"{group.Key}: clients={group.Count()} sent={group.Sum(x => x.SentMoves)} accepted={group.Sum(x => x.AcceptedMoves)} rejected={group.Sum(x => x.RejectedMoves)} avgRttMs={Math.Round(groupRtt, 2)} reasons=[{reasons}]");
 }
 
-var metrics = await http.GetFromJsonAsync<JsonElement>("/api/admin/metrics");
-Console.WriteLine("---- server metrics ----");
-Console.WriteLine(JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
-
-static async Task<ClientResult> RunClientAsync(LoadTestConfig config, string roomId, int roomIndex, int clientIndex)
+var metricsRequest = new HttpRequestMessage(HttpMethod.Get, "/api/admin/metrics");
+if (!string.IsNullOrWhiteSpace(config.AdminToken))
 {
+    metricsRequest.Headers.Add(AdminTokenHeaderName, config.AdminToken);
+}
+
+var metricsResponse = await http.SendAsync(metricsRequest);
+Console.WriteLine("---- server metrics ----");
+if (metricsResponse.IsSuccessStatusCode)
+{
+    var metrics = await metricsResponse.Content.ReadFromJsonAsync<JsonElement>();
+    Console.WriteLine(JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
+}
+else
+{
+    Console.WriteLine($"metricsUnavailable={metricsResponse.StatusCode}");
+}
+
+static async Task<ClientResult> RunClientAsync(LoadTestConfig config, HttpClient http, string roomId, int roomIndex, int clientIndex)
+{
+    var playerName = $"bot-{roomIndex}-{clientIndex}-{GetProfile(config.Scenario, clientIndex)}";
+    var identity = await http.GetFromJsonAsync<PlayerIdentityResponse>("/api/player/identity")
+        ?? throw new InvalidOperationException("Player identity response was empty.");
+    using var joinRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/rooms/{roomId}/join")
+    {
+        Content = JsonContent.Create(new { playerName })
+    };
+    joinRequest.Headers.Add(PlayerIdentityHeaderName, identity.Token);
+    using var joinResponse = await http.SendAsync(joinRequest);
+    joinResponse.EnsureSuccessStatusCode();
+    var joined = await joinResponse.Content.ReadFromJsonAsync<JoinRoomResponse>()
+        ?? throw new InvalidOperationException("Join room response was empty.");
+
     using var socket = new ClientWebSocket();
     var profile = GetProfile(config.Scenario, clientIndex);
-    var uri = new Uri(config.WebSocketBaseUri, $"/ws/game?roomId={roomId}&playerName=bot-{roomIndex}-{clientIndex}-{profile}");
-    await socket.ConnectAsync(uri, CancellationToken.None);
+    await socket.ConnectAsync(new Uri(joined.WsUrl), CancellationToken.None);
 
     var result = new ClientResult(profile);
     var receiveTask = Task.Run(() => ReceiveAsync(socket, result));
@@ -295,7 +324,6 @@ static string GetProfile(LoadScenario scenario, int clientIndex)
 sealed class LoadTestConfig
 {
     public Uri HttpBaseUri { get; init; } = new("http://localhost:5199");
-    public Uri WebSocketBaseUri { get; init; } = new("ws://localhost:5199");
     public LoadScenario Scenario { get; init; } = LoadScenario.Default;
     public int Rooms { get; init; } = 10;
     public int ClientsPerRoom { get; init; } = 4;
@@ -304,6 +332,7 @@ sealed class LoadTestConfig
     public int FastMoveIntervalMs { get; init; } = 40;
     public int SlowMoveIntervalMs { get; init; } = 250;
     public int ArtificialDelayMs { get; init; }
+    public string? AdminToken { get; init; }
 
     public static LoadTestConfig Parse(string[] args)
     {
@@ -323,7 +352,6 @@ sealed class LoadTestConfig
         return new LoadTestConfig
         {
             HttpBaseUri = new Uri(values.GetValueOrDefault("http", "http://localhost:5199")),
-            WebSocketBaseUri = new Uri(values.GetValueOrDefault("ws", "ws://localhost:5199")),
             Scenario = scenario,
             Rooms = ReadInt(values, "rooms", defaultRooms),
             ClientsPerRoom = ReadInt(values, "clients", defaultClients),
@@ -331,7 +359,8 @@ sealed class LoadTestConfig
             MoveIntervalMs = ReadInt(values, "moveIntervalMs", 110),
             FastMoveIntervalMs = ReadInt(values, "fastMoveIntervalMs", 40),
             SlowMoveIntervalMs = ReadInt(values, "slowMoveIntervalMs", 250),
-            ArtificialDelayMs = ReadInt(values, "delayMs", 0)
+            ArtificialDelayMs = ReadInt(values, "delayMs", 0),
+            AdminToken = values.GetValueOrDefault("adminToken") ?? Environment.GetEnvironmentVariable("POKEMON2_ADMIN_TOKEN")
         };
     }
 
@@ -374,5 +403,7 @@ sealed class ClientResult
 }
 
 sealed record RoomSummary(string RoomId);
+sealed record PlayerIdentityResponse(string UserId, string Token, DateTimeOffset IssuedAt);
+sealed record JoinRoomResponse(RoomSummary Room, string PlayerName, string WsUrl);
 
 readonly record struct TestPosition(int X, int Y);

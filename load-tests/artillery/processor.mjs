@@ -2,12 +2,14 @@ const directions = ["Left", "Right", "Up", "Down"];
 
 export function connectIsolatedRoom(params, context, next) {
   createRoom(context)
-    .then((room) => {
+    .then((room) => joinRoom(room.roomId, playerName(context)))
+    .then((joined) => {
+      const room = joined.room;
       context.vars.roomId = room.roomId;
-      context.vars.playerName = playerName(context);
+      context.vars.playerName = joined.playerName;
       context.vars.sequence = 0;
       context.vars.paceMs = movementPaceMs(context);
-      params.target = websocketUrl(room.roomId, context.vars.playerName, params.target);
+      params.target = joined.wsUrl;
       next();
     })
     .catch(next);
@@ -15,12 +17,13 @@ export function connectIsolatedRoom(params, context, next) {
 
 export function connectHotRoom(params, context, next) {
   getHotRoomId()
-    .then((roomId) => {
-      context.vars.roomId = roomId;
-      context.vars.playerName = playerName(context);
+    .then((roomId) => joinRoom(roomId, playerName(context)))
+    .then((joined) => {
+      context.vars.roomId = joined.room.roomId;
+      context.vars.playerName = joined.playerName;
       context.vars.sequence = 0;
       context.vars.paceMs = movementPaceMs(context);
-      params.target = websocketUrl(roomId, context.vars.playerName, params.target);
+      params.target = joined.wsUrl;
       next();
     })
     .catch(next);
@@ -61,6 +64,33 @@ async function createRoom(context) {
   return response.json();
 }
 
+async function issueIdentity() {
+  const response = await fetch(`${httpBaseUrl()}/api/player/identity`);
+  if (!response.ok) {
+    throw new Error(`identity issue failed: ${response.status} ${await response.text()}`);
+  }
+
+  return response.json();
+}
+
+async function joinRoom(roomId, name) {
+  const identity = await issueIdentity();
+  const response = await fetch(`${httpBaseUrl()}/api/rooms/${roomId}/join`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Player-Identity": identity.token,
+    },
+    body: JSON.stringify({ playerName: name }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`room join failed: ${response.status} ${await response.text()}`);
+  }
+
+  return response.json();
+}
+
 async function getHotRoomId() {
   if (process.env.POKEMON2_ROOM_ID) {
     return process.env.POKEMON2_ROOM_ID;
@@ -78,11 +108,6 @@ async function getHotRoomId() {
   }
 
   return firstRoom.roomId;
-}
-
-function websocketUrl(roomId, name, fallbackTarget) {
-  const base = process.env.POKEMON2_WS_TARGET ?? fallbackTarget ?? "ws://localhost:5199";
-  return `${base}/ws/game?roomId=${encodeURIComponent(roomId)}&playerName=${encodeURIComponent(name)}`;
 }
 
 function httpBaseUrl() {

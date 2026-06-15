@@ -33,7 +33,9 @@ public sealed class GameDbContext : DbContext
         save.Property(x => x.GameStateJson).HasColumnName("game_state_json").HasColumnType("jsonb");
         save.Property(x => x.CreatedAt).HasColumnName("created_at");
         save.Property(x => x.UpdatedAt).HasColumnName("updated_at");
-        save.HasIndex(x => new { x.UserId, x.Mode, x.SlotNumber }).IsUnique();
+        save.HasIndex(x => new { x.UserId, x.Mode, x.SlotNumber })
+            .HasDatabaseName("ix_player_saves_user_mode_slot_number")
+            .IsUnique();
 
         var battle = modelBuilder.Entity<BattleResult>();
         battle.ToTable("battle_results");
@@ -47,6 +49,7 @@ public sealed class GameDbContext : DbContext
         battle.Property(x => x.Won).HasColumnName("won");
         battle.Property(x => x.ServerTick).HasColumnName("server_tick");
         battle.Property(x => x.CreatedAt).HasColumnName("created_at");
-        battle.HasIndex(x => new { x.RoomId, x.CreatedAt });
+        battle.HasIndex(x => new { x.RoomId, x.CreatedAt })
+            .HasDatabaseName("ix_battle_results_room_id_created_at");
     }
 }

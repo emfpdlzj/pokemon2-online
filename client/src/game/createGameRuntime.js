@@ -310,6 +310,7 @@ const multiSaveSummaryEl = document.getElementById("multi-save-summary");
 const multiSaveSlotsEl = document.getElementById("multi-save-slots");
 const adminMetricsEl = document.getElementById("admin-metrics");
 const serverUrlInput = document.getElementById("server-url-input");
+const adminTokenInput = document.getElementById("admin-token-input");
 const multiplayerPanel = document.getElementById("multiplayer-panel");
 const multiplayerRoomNameEl = document.getElementById("multiplayer-room-name");
 const multiplayerConnectionDetailEl = document.getElementById("multiplayer-connection-detail");
@@ -1853,8 +1854,10 @@ const PLAYER_IDENTITY_KEY = "pokemonDemoPlayerIdentity";
 const ACTIVE_SAVE_KEY = "pokemonDemoActiveSaveId";
 const ACTIVE_SLOT_KEY = "pokemonDemoActiveSlot";
 const ACTIVE_SAVE_MODE_KEY = "pokemonDemoActiveSaveMode";
+const ADMIN_TOKEN_KEY = "pokemonDemoAdminToken";
 const DEFAULT_API_BASE = CLIENT_ENV.POKEMON2_API_BASE || "";
 let apiBase = localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE;
+let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
 let playerIdentity = readStoredPlayerIdentity();
 let selectedSaveMode = normalizeSaveMode(readScopedStorageValue(ACTIVE_SAVE_MODE_KEY) || localStorage.getItem(ACTIVE_SAVE_MODE_KEY) || "single");
 let activeSaveId = readSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode) || null;
@@ -1872,6 +1875,7 @@ const saveSync = {
 };
 
 serverUrlInput.value = apiBase;
+adminTokenInput.value = adminToken;
 
 function resetState(playerName, mode = "single", roomId = null) {
   state.playerName = playerName || "주인공";
@@ -2021,6 +2025,14 @@ function buildIdentityHeaders(headers = {}) {
   return {
     ...headers,
     "X-Player-Identity": playerIdentity.token,
+  };
+}
+
+function buildAdminHeaders(headers = {}) {
+  if (!adminToken) return headers;
+  return {
+    ...headers,
+    "X-Admin-Token": adminToken,
   };
 }
 
@@ -2902,7 +2914,9 @@ async function renderAdminMetrics() {
   setStatus("운영 지표를 불러오는 중...");
   adminMetricsEl.innerHTML = "";
   try {
-    const metrics = await fetchJson(`${apiBase}/api/admin/metrics`);
+    const metrics = await fetchJson(`${apiBase}/api/admin/metrics`, {
+      headers: buildAdminHeaders(),
+    });
     const totals = metrics.totals || {};
     const reasons = totals.rejectedMoveReasons || {};
     const rooms = metrics.rooms || [];
@@ -2965,8 +2979,14 @@ document.getElementById("admin-back-btn").addEventListener("click", () => setMen
 document.getElementById("refresh-admin-btn").addEventListener("click", renderAdminMetrics);
 document.getElementById("save-settings-btn").addEventListener("click", () => {
   apiBase = serverUrlInput.value.trim() || DEFAULT_API_BASE;
+  adminToken = adminTokenInput.value.trim();
   localStorage.setItem(API_BASE_KEY, apiBase);
-  setStatus("서버 주소를 저장했습니다.");
+  if (adminToken) {
+    localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+  } else {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  }
+  setStatus("서버 주소와 관리자 토큰 설정을 저장했습니다.");
 });
 saveRetryBtn.addEventListener("click", async () => {
   if (!saveSync.pendingPayload) return;
