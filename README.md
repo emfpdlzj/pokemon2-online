@@ -50,7 +50,7 @@
 ### LLM 기반 라이벌 대화
 
 - 라이벌 캐릭터와 자유 대화 가능
-- LLM API 연동
+- 백엔드 LLM 프록시 연동
 - 게임 세계관을 유지하도록 프롬프트 제어
 
 ### 턴제 전투 시스템
@@ -203,6 +203,8 @@ server/
   Pokemon2.LoadTest/
 
 docs/
+  backlog.md
+  development-todo.md
   server-portfolio.md
   datadog-observability.md
 
@@ -215,9 +217,14 @@ assets/
 
 ## 주의사항
 
-- LLM API 키는 실제 서비스 환경에서 클라이언트에 직접 포함하면 안 됩니다.
-- 실제 배포 시에는 백엔드 서버를 통해 LLM API를 호출하도록 분리해야 합니다.
+- LLM API 키는 `server/.env` 또는 서버 런타임 환경변수에만 둡니다.
+- 클라이언트는 `/api/llm/*` 백엔드 프록시를 통해서만 LLM 기능을 사용합니다.
 - 현재 온라인 서버는 포트폴리오 목적의 구조 확장 버전이며, 운영 서비스 수준의 인증/보안/매칭 시스템은 별도 보강이 필요합니다.
+
+## 개발 문서
+
+- 남은 핵심 개발 항목: [docs/development-todo.md](./docs/development-todo.md)
+- backlog 기록: [docs/backlog.md](./docs/backlog.md)
 
 ## Author
 

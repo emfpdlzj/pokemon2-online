@@ -13,7 +13,8 @@ cp server/.env.example server/.env
 node scripts/build-client-env.mjs
 ```
 
-`client/env.js`는 브라우저에 그대로 노출되는 런타임 설정 파일이다. Gemini 키를 넣으면 사용자가 볼 수 있으므로 공개 가능한 키만 사용한다.
+`client/env.js`는 브라우저에 그대로 노출되는 런타임 설정 파일이다. 공개 가능한 값만 넣는다.
+LLM API 키는 `client/env.js`에 넣지 않고 `server/.env` 또는 루트 `.env`의 서버용 항목으로만 관리한다.
 
 ### 1. PostgreSQL 실행
 
