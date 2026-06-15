@@ -83,6 +83,29 @@
     <!-- 선택지 -->
     <div id="choices"></div>
 
+    <div id="multiplayer-panel">
+      <div id="multiplayer-status-bar">
+        <div>
+          <div id="multiplayer-room-name">멀티플레이 연결 안 됨</div>
+          <div id="multiplayer-connection-detail">싱글 모드에서는 이 패널이 숨겨집니다.</div>
+        </div>
+        <div id="multiplayer-status-actions">
+          <span id="multiplayer-connection-badge" data-state="idle">대기</span>
+          <button id="multiplayer-reconnect-btn" class="btn secondary" type="button">재입장</button>
+        </div>
+      </div>
+      <div id="multiplayer-panel-grid">
+        <section class="multiplayer-card">
+          <h3>방 상태</h3>
+          <div id="multiplayer-player-list"></div>
+        </section>
+        <section class="multiplayer-card">
+          <h3>시스템 로그</h3>
+          <div id="multiplayer-event-log"></div>
+        </section>
+      </div>
+    </div>
+
   </div>
 
   <!-- 스타터 선택 오버레이 -->
