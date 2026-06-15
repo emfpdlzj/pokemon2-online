@@ -91,7 +91,7 @@
 - C# WebSocket 봇 클라이언트
 - Artillery 기반 부하 테스트 시나리오
 
-자세한 서버 설계와 트러블슈팅 내용은 [docs/server-portfolio.md](./docs/server-portfolio.md)를 참고하세요.
+자세한 서버 설계와 트러블슈팅 내용은 [docs/server-portfolio.md](./docs/server-portfolio.md)를 참고하세요. 제출용 소개문은 [docs/portfolio-intro.md](./docs/portfolio-intro.md)에 정리했습니다.
 
 ## 기술 스택
 
@@ -205,6 +205,7 @@ server/
 docs/
   backlog.md
   development-todo.md
+  portfolio-intro.md
   server-portfolio.md
   datadog-observability.md
 
