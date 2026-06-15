@@ -14,6 +14,11 @@ import {
   resolveSaveConflict,
 } from "./saveSync.js";
 import { isBlockedTile } from "./tileCollision.js";
+import {
+  pruneEntityRenderStates,
+  readEntityRenderPosition,
+  upsertEntityRenderState,
+} from "./entityInterpolation.js";
 
 export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV || {} }) {
 const MAPS = maps;
@@ -87,6 +92,7 @@ const MOVE_DELAY = 0; // ms, 다음 이동 입력 허용 간격
 const MOVE_DURATION = 220; // ms, 한 타일 실제 이동 시간
 const NPC_MOVE_DURATION = 220; // ms, NPC 한 타일 이동 시간
 const NPC_STEP_DELAY = NPC_MOVE_DURATION + 30; // ms, 다음 NPC 이동까지 대기
+const REMOTE_PLAYER_MOVE_DURATION = 140; // ms, 다른 플레이어 렌더 보간 시간
 
 // 렌더링용 픽셀 좌표
 let renderX = 0, renderY = 0;
@@ -223,6 +229,7 @@ const multiplayer = {
   maxReconnectAttempts: 3,
   manualDisconnect: false,
   events: [],
+  remotePlayerRenderStates: new Map(),
 };
 
 let battleRuntime = null;
@@ -946,6 +953,20 @@ function drawRemotePlayer(ctx, sx, sy, player) {
   ctx.fillText(label, sx + TILE / 2, sy - 6);
 }
 
+function syncRemotePlayerRenderStates(players, now = performance.now()) {
+  const activeIds = new Set();
+  players.forEach(player => {
+    if (!player?.playerId || player.playerId === multiplayer.playerId || !player.position) return;
+    activeIds.add(player.playerId);
+    upsertEntityRenderState(multiplayer.remotePlayerRenderStates, player.playerId, player.position, {
+      now,
+      tileSize: TILE,
+      duration: REMOTE_PLAYER_MOVE_DURATION,
+    });
+  });
+  pruneEntityRenderStates(multiplayer.remotePlayerRenderStates, activeIds);
+}
+
 function drawServerMonster(ctx, sx, sy, monster) {
   const ratio = Math.max(0, Math.min(1, (monster.hp || 0) / Math.max(1, monster.maxHp || 1)));
   ctx.fillStyle = "rgba(0,0,0,0.2)";
@@ -1387,6 +1408,7 @@ function drawMap(ts = performance.now()) {
   });
 
   if (state.mode === "multi") {
+    syncRemotePlayerRenderStates(multiplayer.players, ts);
     multiplayer.monsters.forEach(monster => {
       if (monster.isAlive === false) return;
       const sx = monster.position.x * TILE - camX;
@@ -1396,8 +1418,9 @@ function drawMap(ts = performance.now()) {
 
     multiplayer.players.forEach(player => {
       if (player.playerId === multiplayer.playerId) return;
-      const sx = player.position.x * TILE - camX;
-      const sy = player.position.y * TILE - camY;
+      const rendered = readEntityRenderPosition(multiplayer.remotePlayerRenderStates, player.playerId, ts);
+      const sx = (rendered?.x ?? player.position.x * TILE) - camX;
+      const sy = (rendered?.y ?? player.position.y * TILE) - camY;
       drawRemotePlayer(ctx, sx, sy, player);
     });
   }
@@ -2397,6 +2420,7 @@ function disconnectMultiplayer({ manual = true, preserveJoinRequest = false, pre
   multiplayer.monsters = new Map();
   multiplayer.battles = new Map();
   multiplayer.lastRejectReason = "";
+  multiplayer.remotePlayerRenderStates = new Map();
   if (!preserveJoinRequest) {
     multiplayer.joinRequest = null;
     multiplayer.roomName = "";
@@ -2448,6 +2472,7 @@ function applyServerSnapshot(snapshot) {
   multiplayer.players = new Map((snapshot.players || []).map(player => [player.playerId, player]));
   multiplayer.monsters = new Map((snapshot.monsters || []).map(monster => [monster.monsterId, monster]));
   multiplayer.battles = new Map((snapshot.battles || []).map(battle => [battle.battleId, battle]));
+  syncRemotePlayerRenderStates(multiplayer.players);
 
   const me = multiplayer.playerId ? multiplayer.players.get(multiplayer.playerId) : null;
   if (me?.position && !moveState.active) {
@@ -2474,6 +2499,13 @@ function applyServerPlayerMoved(payload) {
     position: payload.position || current.position,
     facing: payload.facing || current.facing,
   });
+  if (payload.playerId !== multiplayer.playerId && payload.position) {
+    upsertEntityRenderState(multiplayer.remotePlayerRenderStates, payload.playerId, payload.position, {
+      now: performance.now(),
+      tileSize: TILE,
+      duration: REMOTE_PLAYER_MOVE_DURATION,
+    });
+  }
 }
 
 function applyMoveRejected(payload) {
@@ -2497,6 +2529,13 @@ function applyPlayerJoined(payload) {
     ...current,
     ...payload,
   });
+  if (payload.playerId !== multiplayer.playerId && payload.position) {
+    upsertEntityRenderState(multiplayer.remotePlayerRenderStates, payload.playerId, payload.position, {
+      now: performance.now(),
+      tileSize: TILE,
+      duration: REMOTE_PLAYER_MOVE_DURATION,
+    });
+  }
   if (payload.playerId !== multiplayer.playerId) {
     pushMultiplayerEvent(`${payload.name || "플레이어"} 님이 방에 들어왔습니다.`);
   }
@@ -2506,6 +2545,7 @@ function applyPlayerJoined(payload) {
 function applyPlayerLeft(payload) {
   if (!payload?.playerId) return;
   multiplayer.players.delete(payload.playerId);
+  multiplayer.remotePlayerRenderStates.delete(payload.playerId);
   pushMultiplayerEvent(`${payload.name || "플레이어"} 님이 방을 나갔습니다.`, "warning");
   updateMultiplayerPanel();
 }
