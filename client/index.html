@@ -25,6 +25,10 @@
 
     <div id="save-menu-panel" class="menu-panel">
       <h2>세이브 슬롯</h2>
+      <div id="save-mode-tabs" class="mode-tabs">
+        <button id="save-mode-single-btn" class="btn secondary mode-tab is-active" type="button">싱글 저장</button>
+        <button id="save-mode-multi-btn" class="btn secondary mode-tab" type="button">멀티 저장</button>
+      </div>
       <p class="save-notice">
         저장 데이터는 서버에 보관됩니다. 서버 연결이 안 되면 현재 브라우저에 임시 저장되며,
         브라우저 데이터 삭제, 시크릿 모드 종료, 다른 기기 접속 시 사라지거나 보이지 않을 수 있습니다.
@@ -35,6 +39,8 @@
 
     <div id="multi-menu-panel" class="menu-panel">
       <h2>멀티 방</h2>
+      <div id="multi-save-summary" class="save-notice"></div>
+      <div id="multi-save-slots" class="slot-mini-grid"></div>
       <div id="room-list"></div>
       <div class="menu-row">
         <input id="room-name-input" type="text" maxlength="20" placeholder="방 이름" value="모험 방">

@@ -96,6 +96,19 @@ body {
   margin-bottom: 12px;
   text-align: center;
 }
+.mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mode-tab {
+  padding-inline: 0;
+}
+.mode-tab.is-active {
+  background: #FFD700;
+  color: #1a1a2e;
+}
 .save-notice {
   margin: 0 0 12px;
   padding: 10px 12px;
@@ -117,6 +130,32 @@ body {
   display: grid;
   gap: 8px;
   margin-bottom: 12px;
+}
+.slot-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.slot-mini {
+  width: 100%;
+  padding: 8px 10px;
+  background: #15152a;
+  border: 2px solid #455070;
+  color: #d6deef;
+  font-family: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+}
+.slot-mini.is-active {
+  border-color: #FFD700;
+  background: #1e2440;
+}
+.slot-mini strong {
+  display: block;
+  color: #FFD700;
+  margin-bottom: 3px;
 }
 .slot-card,
 .room-card {
