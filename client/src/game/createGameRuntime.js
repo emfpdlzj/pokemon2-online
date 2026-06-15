@@ -318,10 +318,10 @@ const multiplayerConnectionBadgeEl = document.getElementById("multiplayer-connec
 const multiplayerPlayerListEl = document.getElementById("multiplayer-player-list");
 const multiplayerEventLogEl = document.getElementById("multiplayer-event-log");
 const multiplayerReconnectBtn = document.getElementById("multiplayer-reconnect-btn");
+const multiplayerLobbyBtn = document.getElementById("multiplayer-lobby-btn");
 
 canvas.width  = CANVAS_W;
 canvas.height = CANVAS_H;
-updateSaveStatusView();
 
 // ============================================================
 //  대화 시스템
@@ -492,6 +492,10 @@ function rememberMultiplayerJoin(room, playerName) {
   multiplayer.roomName = room?.roomName || multiplayer.roomName || "멀티 방";
 }
 
+function isRoomFull(room) {
+  return Number(room?.playerCount || 0) >= Number(room?.maxPlayers || 0);
+}
+
 function renderMultiplayerPlayers() {
   const players = [...multiplayer.players.values()].sort((left, right) => left.name.localeCompare(right.name, "ko"));
   if (players.length === 0) {
@@ -594,7 +598,7 @@ function scheduleMultiplayerReconnect() {
     try {
       await rejoinMultiplayer({ automatic: true });
     } catch (error) {
-      const message = describeJoinError(parseHttpStatus(error));
+      const message = describeJoinError(parseHttpStatus(error), { reconnecting: true });
       pushMultiplayerEvent(message, "warning");
       scheduleMultiplayerReconnect();
     }
@@ -1876,6 +1880,7 @@ const saveSync = {
 
 serverUrlInput.value = apiBase;
 adminTokenInput.value = adminToken;
+updateSaveStatusView();
 
 function resetState(playerName, mode = "single", roomId = null) {
   state.playerName = playerName || "주인공";
@@ -2404,6 +2409,16 @@ function disconnectMultiplayer({ manual = true, preserveJoinRequest = false, pre
   updateMultiplayerPanel();
 }
 
+async function returnToMultiplayerLobby(statusMessage = "방 목록으로 돌아왔습니다. 다시 입장할 방을 선택하세요.") {
+  disconnectMultiplayer();
+  state.phase = "title";
+  state.roomId = null;
+  gameWrapper.style.display = "none";
+  startScreen.style.display = "block";
+  setMenuPanel(multiMenuPanel);
+  await renderRooms({ postStatus: statusMessage });
+}
+
 function sendMultiplayer(type, payload) {
   const socket = multiplayer.socket;
   if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -2855,7 +2870,7 @@ async function renderSaveSlots(mode = selectedSaveMode) {
   }
 }
 
-async function renderRooms() {
+async function renderRooms({ postStatus = "" } = {}) {
   setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: activeSaveId });
   setMenuPanel(multiMenuPanel);
   updateSaveModeTabs();
@@ -2869,12 +2884,18 @@ async function renderRooms() {
     renderMultiSlotPicker(saves);
     renderMultiSaveSummary(saves);
     rooms.forEach(room => {
+      const full = isRoomFull(room);
       const button = document.createElement("button");
       button.className = "room-card";
       button.type = "button";
+      button.disabled = full;
       button.innerHTML = `
         <div class="room-title">${room.roomName}</div>
-        <div class="room-meta">${room.mapName} · ${room.playerCount}/${room.maxPlayers}명</div>
+        <div class="room-meta-row">
+          <div class="room-meta">${room.mapName} · ${room.playerCount}/${room.maxPlayers}명</div>
+          <span class="room-badge ${full ? "full" : ""}">${full ? "만석" : "입장 가능"}</span>
+        </div>
+        <div class="room-meta">${full ? "현재 방이 가득 차 있어 입장할 수 없습니다." : "선택한 멀티 슬롯으로 입장해 이어서 진행합니다."}</div>
       `;
       button.onclick = async () => {
         try {
@@ -2903,7 +2924,7 @@ async function renderRooms() {
     if (rooms.length === 0) {
       roomListEl.innerHTML = `<div class="room-card"><div class="room-meta">생성된 방이 없습니다.</div></div>`;
     }
-    setStatus("");
+    setStatus(postStatus);
   } catch {
     setStatus("서버 방 목록을 불러오지 못했습니다. 백엔드 서버와 PostgreSQL 설정을 확인하세요.");
   }
@@ -3016,10 +3037,13 @@ multiplayerReconnectBtn.addEventListener("click", async () => {
     multiplayer.reconnectAttempts = 0;
     await rejoinMultiplayer({ automatic: false });
   } catch (error) {
-    const message = describeJoinError(parseHttpStatus(error));
+    const message = describeJoinError(parseHttpStatus(error), { reconnecting: true });
     setMultiplayerConnection("error", message);
     pushMultiplayerEvent(message, "error");
   }
+});
+multiplayerLobbyBtn.addEventListener("click", () => {
+  returnToMultiplayerLobby();
 });
 
 // 채팅 전송

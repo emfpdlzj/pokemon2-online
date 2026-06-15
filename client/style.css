@@ -168,15 +168,50 @@ body {
   text-align: left;
   cursor: pointer;
 }
+.slot-card:disabled,
+.room-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
 .slot-card:hover,
 .room-card:hover {
   border-color: #FFD700;
+}
+.slot-card:disabled:hover,
+.room-card:disabled:hover {
+  border-color: #455070;
 }
 .slot-title,
 .room-title {
   color: #FFD700;
   font-weight: bold;
   margin-bottom: 4px;
+}
+.room-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.room-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #6daac0;
+  background: rgba(90, 133, 153, 0.18);
+  color: #dff7ff;
+  font-size: 0.68rem;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+.room-badge.full {
+  border-color: #ff8a8a;
+  background: rgba(255, 92, 92, 0.14);
+  color: #ffc7c7;
 }
 .slot-meta,
 .room-meta {
@@ -407,6 +442,10 @@ body {
   color: #ffc7c7;
 }
 #multiplayer-reconnect-btn {
+  padding: 8px 14px;
+  letter-spacing: 1px;
+}
+#multiplayer-lobby-btn {
   padding: 8px 14px;
   letter-spacing: 1px;
 }
