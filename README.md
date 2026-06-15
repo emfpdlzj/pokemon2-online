@@ -208,6 +208,8 @@ docs/
   server-portfolio.md
   datadog-observability.md
 
+CHANGELOG.md
+
 load-tests/
   artillery/
 
@@ -223,6 +225,7 @@ assets/
 
 ## 개발 문서
 
+- 변경 이력: [CHANGELOG.md](./CHANGELOG.md)
 - 남은 핵심 개발 항목: [docs/development-todo.md](./docs/development-todo.md)
 - backlog 기록: [docs/backlog.md](./docs/backlog.md)
 
