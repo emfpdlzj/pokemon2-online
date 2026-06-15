@@ -27,11 +27,13 @@ builder.Services.AddDbContext<GameDbContext>(options =>
 
     options.UseNpgsql(NormalizePostgresConnectionString(connectionString));
 });
-builder.Services.AddSingleton(LlmOptions.FromConfiguration(builder.Configuration));
+var llmOptions = LlmOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(llmOptions);
 builder.Services.AddHttpClient<ILlmTextClient, OpenAiCompatibleLlmClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(20);
 });
+builder.Services.AddSingleton<LlmRequestLimiter>();
 builder.Services.AddSingleton<GameDialogueService>();
 builder.Services.AddSingleton<MapCatalog>();
 builder.Services.AddSingleton<ServerMetrics>();
@@ -115,47 +117,29 @@ app.MapGet("/api/player/identity", (HttpContext context, PlayerIdentityService i
     return Results.Ok(new PlayerIdentityResponse(issuedIdentity.UserId, issuedIdentity.Token, issuedIdentity.IssuedAt));
 });
 
-app.MapPost("/api/llm/reply", async (GameDialogueService llm, LlmReplyRequest request, CancellationToken cancellationToken) =>
+app.MapPost("/api/llm/reply", async (HttpContext context, GameDialogueService llm, PlayerIdentityService identityService, LlmReplyRequest request, CancellationToken cancellationToken) =>
 {
-    if (!llm.IsConfigured)
-    {
-        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
-
     try
     {
-        var reply = await llm.GenerateReplyAsync(request.Character, request.Message, cancellationToken);
-        return Results.Ok(new LlmReplyResponse(reply));
+        var result = await llm.GenerateReplyAsync(request.Character, request.Message, ResolveLlmRateLimitKey(context, identityService), cancellationToken);
+        return Results.Ok(new LlmReplyResponse(result.Reply, result.Source, result.Status, result.Character, result.Model));
     }
     catch (ArgumentException ex)
     {
         return Results.BadRequest(new { message = ex.Message });
-    }
-    catch (Exception)
-    {
-        return Results.StatusCode(StatusCodes.Status502BadGateway);
     }
 });
 
-app.MapPost("/api/llm/choices", async (GameDialogueService llm, LlmChoicesRequest request, CancellationToken cancellationToken) =>
+app.MapPost("/api/llm/choices", async (HttpContext context, GameDialogueService llm, PlayerIdentityService identityService, LlmChoicesRequest request, CancellationToken cancellationToken) =>
 {
-    if (!llm.IsConfigured)
-    {
-        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
-
     try
     {
-        var choices = await llm.GenerateChoicesAsync(request.Message, cancellationToken);
-        return Results.Ok(new LlmChoicesResponse(choices));
+        var result = await llm.GenerateChoicesAsync(request.Message, ResolveLlmRateLimitKey(context, identityService), cancellationToken);
+        return Results.Ok(new LlmChoicesResponse(result.Choices, result.Source, result.Status, result.Model));
     }
     catch (ArgumentException ex)
     {
         return Results.BadRequest(new { message = ex.Message });
-    }
-    catch (Exception)
-    {
-        return Results.StatusCode(StatusCodes.Status502BadGateway);
     }
 });
 
@@ -332,6 +316,22 @@ static string NormalizePostgresConnectionString(string connectionString)
     var password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? "");
     var database = uri.AbsolutePath.TrimStart('/');
     return $"Host={uri.Host};Port={uri.Port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+}
+
+static string ResolveLlmRateLimitKey(HttpContext context, PlayerIdentityService identityService)
+{
+    if (identityService.TryResolve(context, out var identity))
+    {
+        return identity.UserId;
+    }
+
+    var forwardedFor = context.Request.Headers["X-Forwarded-For"].ToString();
+    if (!string.IsNullOrWhiteSpace(forwardedFor))
+    {
+        return forwardedFor.Split(',')[0].Trim();
+    }
+
+    return context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
 }
 
 public sealed record CreateRoomRequest(string? RoomName, string? MapId);

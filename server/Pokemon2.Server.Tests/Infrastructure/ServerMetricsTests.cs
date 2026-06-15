@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Pokemon2.Server.Infrastructure;
+using Pokemon2.Server.Llm;
 
 namespace Pokemon2.Server.Tests.Infrastructure;
 
@@ -19,6 +20,8 @@ public sealed class ServerMetricsTests
         metrics.RecordCommandLatency(TimeSpan.FromMilliseconds(5));
         metrics.RecordTickDelay(TimeSpan.FromMilliseconds(1));
         metrics.RecordTickDelay(TimeSpan.FromMilliseconds(4));
+        metrics.RecordLlmResult(LlmOperation.Reply, false, null, new LlmCompletionUsage(10, 5, 15, 0.00005m));
+        metrics.RecordLlmResult(LlmOperation.Choices, true, "rate_limited", null);
 
         var snapshot = ToNode(metrics.GetSnapshot());
 
@@ -31,6 +34,13 @@ public sealed class ServerMetricsTests
         Assert.Equal(5, snapshot["maxCommandLatencyMs"]?.GetValue<double>());
         Assert.Equal(2.5, snapshot["averageTickDelayMs"]?.GetValue<double>());
         Assert.Equal(4, snapshot["maxTickDelayMs"]?.GetValue<double>());
+        Assert.Equal(1, snapshot["llm"]?["replyRequests"]?.GetValue<long>());
+        Assert.Equal(1, snapshot["llm"]?["replySuccess"]?.GetValue<long>());
+        Assert.Equal(1, snapshot["llm"]?["choicesRequests"]?.GetValue<long>());
+        Assert.Equal(1, snapshot["llm"]?["choicesFallbacks"]?.GetValue<long>());
+        Assert.Equal(1, snapshot["llm"]?["failureReasons"]?["rate_limited"]?.GetValue<long>());
+        Assert.Equal(15, snapshot["llm"]?["totalTokens"]?.GetValue<long>());
+        Assert.Equal(0.00005, snapshot["llm"]?["estimatedCostUsd"]?.GetValue<double>());
     }
 
     private static JsonNode ToNode(object value)

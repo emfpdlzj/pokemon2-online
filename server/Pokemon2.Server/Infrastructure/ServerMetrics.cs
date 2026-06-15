@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Pokemon2.Server.Llm;
 
 namespace Pokemon2.Server.Infrastructure;
 
@@ -21,6 +22,20 @@ public sealed class ServerMetrics
     private long _tickDelayTotalTicks;
     private long _tickDelaySamples;
     private long _maxTickDelayTicks;
+    private long _llmReplyRequests;
+    private long _llmReplySuccess;
+    private long _llmReplyFallbacks;
+    private long _llmChoicesRequests;
+    private long _llmChoicesSuccess;
+    private long _llmChoicesFallbacks;
+    private long _llmRateLimited;
+    private long _llmProviderErrors;
+    private long _llmInvalidResponses;
+    private long _llmNotConfigured;
+    private long _llmPromptTokens;
+    private long _llmCompletionTokens;
+    private long _llmTotalTokens;
+    private long _llmEstimatedCostMicros;
 
     public void IncrementRoomCreated() => Interlocked.Increment(ref _roomsCreated);
     public void IncrementJoined() => Interlocked.Increment(ref _joined);
@@ -52,6 +67,46 @@ public sealed class ServerMetrics
         SetMax(ref _maxTickDelayTicks, ticks);
     }
 
+    public void RecordLlmResult(LlmOperation operation, bool usedFallback, string? failureReason, LlmCompletionUsage? usage)
+    {
+        if (operation == LlmOperation.Reply)
+        {
+            Interlocked.Increment(ref _llmReplyRequests);
+            Interlocked.Increment(ref usedFallback ? ref _llmReplyFallbacks : ref _llmReplySuccess);
+        }
+        else
+        {
+            Interlocked.Increment(ref _llmChoicesRequests);
+            Interlocked.Increment(ref usedFallback ? ref _llmChoicesFallbacks : ref _llmChoicesSuccess);
+        }
+
+        switch (failureReason)
+        {
+            case "rate_limited":
+                Interlocked.Increment(ref _llmRateLimited);
+                break;
+            case "provider_error":
+                Interlocked.Increment(ref _llmProviderErrors);
+                break;
+            case "invalid_response":
+                Interlocked.Increment(ref _llmInvalidResponses);
+                break;
+            case "not_configured":
+                Interlocked.Increment(ref _llmNotConfigured);
+                break;
+        }
+
+        if (usage is null)
+        {
+            return;
+        }
+
+        Interlocked.Add(ref _llmPromptTokens, usage.PromptTokens);
+        Interlocked.Add(ref _llmCompletionTokens, usage.CompletionTokens);
+        Interlocked.Add(ref _llmTotalTokens, usage.TotalTokens);
+        Interlocked.Add(ref _llmEstimatedCostMicros, (long)decimal.Round(usage.EstimatedCostUsd * 1_000_000m, 0, MidpointRounding.AwayFromZero));
+    }
+
     public ServerMetricsSnapshot GetSnapshot()
     {
         var avgCommandLatencyMs = GetAverageMilliseconds(
@@ -77,7 +132,23 @@ public sealed class ServerMetrics
             avgCommandLatencyMs,
             Milliseconds(Interlocked.Read(ref _maxCommandLatencyTicks)),
             avgTickDelayMs,
-            Milliseconds(Interlocked.Read(ref _maxTickDelayTicks)));
+            Milliseconds(Interlocked.Read(ref _maxTickDelayTicks)),
+            new LlmMetricsSnapshot(
+                Interlocked.Read(ref _llmReplyRequests),
+                Interlocked.Read(ref _llmReplySuccess),
+                Interlocked.Read(ref _llmReplyFallbacks),
+                Interlocked.Read(ref _llmChoicesRequests),
+                Interlocked.Read(ref _llmChoicesSuccess),
+                Interlocked.Read(ref _llmChoicesFallbacks),
+                new LlmFailureReasonCounts(
+                    Interlocked.Read(ref _llmRateLimited),
+                    Interlocked.Read(ref _llmProviderErrors),
+                    Interlocked.Read(ref _llmInvalidResponses),
+                    Interlocked.Read(ref _llmNotConfigured)),
+                Interlocked.Read(ref _llmPromptTokens),
+                Interlocked.Read(ref _llmCompletionTokens),
+                Interlocked.Read(ref _llmTotalTokens),
+                Math.Round(Interlocked.Read(ref _llmEstimatedCostMicros) / 1_000_000d, 6)));
     }
 
     private void IncrementRejectedReason(string reason)
@@ -131,7 +202,8 @@ public sealed record ServerMetricsSnapshot(
     double AverageCommandLatencyMs,
     double MaxCommandLatencyMs,
     double AverageTickDelayMs,
-    double MaxTickDelayMs);
+    double MaxTickDelayMs,
+    LlmMetricsSnapshot Llm);
 
 public sealed record ServerRejectedMoveReasonCounts(
     [property: JsonPropertyName("tile_occupied")]
@@ -140,3 +212,26 @@ public sealed record ServerRejectedMoveReasonCounts(
     long SpeedHackDetected,
     [property: JsonPropertyName("stale_sequence")]
     long StaleSequence);
+
+public sealed record LlmMetricsSnapshot(
+    long ReplyRequests,
+    long ReplySuccess,
+    long ReplyFallbacks,
+    long ChoicesRequests,
+    long ChoicesSuccess,
+    long ChoicesFallbacks,
+    LlmFailureReasonCounts FailureReasons,
+    long PromptTokens,
+    long CompletionTokens,
+    long TotalTokens,
+    double EstimatedCostUsd);
+
+public sealed record LlmFailureReasonCounts(
+    [property: JsonPropertyName("rate_limited")]
+    long RateLimited,
+    [property: JsonPropertyName("provider_error")]
+    long ProviderError,
+    [property: JsonPropertyName("invalid_response")]
+    long InvalidResponse,
+    [property: JsonPropertyName("not_configured")]
+    long NotConfigured);

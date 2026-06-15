@@ -16,11 +16,8 @@ async function requestLlmJson(path, payload) {
   return res.json();
 }
 
-const FALLBACK_REPLIES = [
-  "나중에 다시 말 걸어줘!",
-  "지금은 좀 바빠. 이따 얘기하자!",
-  "음... 잘 모르겠는데, 나중에 물어봐.",
-];
+const RIVAL_FALLBACK_REPLY = "나중에 다시 말 걸어줘!";
+const BINNA_FALLBACK_REPLY = "또 얘기하자!";
 
 function sanitizeCharacterReply(reply, fallback) {
   const text = String(reply || "").replace(/\s+/g, " ").trim();
@@ -37,19 +34,19 @@ async function getRivalReply(userMessage) {
     const data = await requestLlmJson("/api/llm/reply", { character: "rival", message: userMessage });
     return sanitizeCharacterReply(
       data?.reply,
-      FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)]
+      RIVAL_FALLBACK_REPLY
     );
   } catch {
-    return FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)];
+    return RIVAL_FALLBACK_REPLY;
   }
 }
 
 async function getBinnaReply(userMessage) {
   try {
     const data = await requestLlmJson("/api/llm/reply", { character: "binna", message: userMessage });
-    return sanitizeCharacterReply(data?.reply, "또 얘기하자!");
+    return sanitizeCharacterReply(data?.reply, BINNA_FALLBACK_REPLY);
   } catch {
-    return "또 얘기하자!";
+    return BINNA_FALLBACK_REPLY;
   }
 }
 

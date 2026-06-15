@@ -86,6 +86,10 @@ public sealed class DatadogMetricsPublisher : BackgroundService
         await client.GaugeAsync("pokemon2.command.latency.max_ms", totals.MaxCommandLatencyMs, cancellationToken: cancellationToken);
         await client.GaugeAsync("pokemon2.tick.delay.avg_ms", totals.AverageTickDelayMs, cancellationToken: cancellationToken);
         await client.GaugeAsync("pokemon2.tick.delay.max_ms", totals.MaxTickDelayMs, cancellationToken: cancellationToken);
+        await client.GaugeAsync("pokemon2.llm.tokens.prompt_total", totals.Llm.PromptTokens, cancellationToken: cancellationToken);
+        await client.GaugeAsync("pokemon2.llm.tokens.completion_total", totals.Llm.CompletionTokens, cancellationToken: cancellationToken);
+        await client.GaugeAsync("pokemon2.llm.tokens.total", totals.Llm.TotalTokens, cancellationToken: cancellationToken);
+        await client.GaugeAsync("pokemon2.llm.cost.estimated_usd_total", totals.Llm.EstimatedCostUsd, cancellationToken: cancellationToken);
 
         var previous = _previousTotals ?? EmptyTotals;
 
@@ -94,6 +98,16 @@ public sealed class DatadogMetricsPublisher : BackgroundService
         await CountRejectedReasonAsync(client, "tile_occupied", totals.RejectedMoveReasons.TileOccupied - previous.RejectedMoveReasons.TileOccupied, null, cancellationToken);
         await CountRejectedReasonAsync(client, "speed_hack_detected", totals.RejectedMoveReasons.SpeedHackDetected - previous.RejectedMoveReasons.SpeedHackDetected, null, cancellationToken);
         await CountRejectedReasonAsync(client, "stale_sequence", totals.RejectedMoveReasons.StaleSequence - previous.RejectedMoveReasons.StaleSequence, null, cancellationToken);
+        await client.CountAsync("pokemon2.llm.reply.requests", totals.Llm.ReplyRequests - previous.Llm.ReplyRequests, cancellationToken: cancellationToken);
+        await client.CountAsync("pokemon2.llm.reply.success", totals.Llm.ReplySuccess - previous.Llm.ReplySuccess, cancellationToken: cancellationToken);
+        await client.CountAsync("pokemon2.llm.reply.fallback", totals.Llm.ReplyFallbacks - previous.Llm.ReplyFallbacks, cancellationToken: cancellationToken);
+        await client.CountAsync("pokemon2.llm.choices.requests", totals.Llm.ChoicesRequests - previous.Llm.ChoicesRequests, cancellationToken: cancellationToken);
+        await client.CountAsync("pokemon2.llm.choices.success", totals.Llm.ChoicesSuccess - previous.Llm.ChoicesSuccess, cancellationToken: cancellationToken);
+        await client.CountAsync("pokemon2.llm.choices.fallback", totals.Llm.ChoicesFallbacks - previous.Llm.ChoicesFallbacks, cancellationToken: cancellationToken);
+        await CountLlmFailureAsync(client, "rate_limited", totals.Llm.FailureReasons.RateLimited - previous.Llm.FailureReasons.RateLimited, cancellationToken);
+        await CountLlmFailureAsync(client, "provider_error", totals.Llm.FailureReasons.ProviderError - previous.Llm.FailureReasons.ProviderError, cancellationToken);
+        await CountLlmFailureAsync(client, "invalid_response", totals.Llm.FailureReasons.InvalidResponse - previous.Llm.FailureReasons.InvalidResponse, cancellationToken);
+        await CountLlmFailureAsync(client, "not_configured", totals.Llm.FailureReasons.NotConfigured - previous.Llm.FailureReasons.NotConfigured, cancellationToken);
     }
 
     private async Task PublishRoomAsync(DogStatsdClient client, RoomSummary room, CancellationToken cancellationToken)
@@ -152,5 +166,26 @@ public sealed class DatadogMetricsPublisher : BackgroundService
         0,
         0,
         0,
-        0);
+        0,
+        new LlmMetricsSnapshot(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            new LlmFailureReasonCounts(0, 0, 0, 0),
+            0,
+            0,
+            0,
+            0));
+
+    private static ValueTask CountLlmFailureAsync(
+        DogStatsdClient client,
+        string reason,
+        long count,
+        CancellationToken cancellationToken)
+    {
+        return client.CountAsync("pokemon2.llm.failures", count, new[] { $"reason:{reason}" }, cancellationToken);
+    }
 }
