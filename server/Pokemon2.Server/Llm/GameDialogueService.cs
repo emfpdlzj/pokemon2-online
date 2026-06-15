@@ -48,7 +48,7 @@ public sealed class GameDialogueService
             var completion = await _client.GenerateTextAsync(
                 new LlmCompletionRequest(LlmOperation.Reply, prompt, normalizedMessage),
                 cancellationToken);
-            var sanitized = SanitizeCharacterReply(completion.Text, ResolveReplyFallback(characterKey));
+            var sanitized = SanitizeCharacterReply(completion.Text);
             _metrics.RecordLlmResult(LlmOperation.Reply, false, null, completion.Usage);
             return new LlmReplyResult(sanitized, "llm", "ok", characterKey, completion.Model, completion.Usage);
         }
@@ -99,7 +99,7 @@ public sealed class GameDialogueService
         if (!document.RootElement.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array)
         {
-            throw new InvalidOperationException("LLM response does not contain a choices array.");
+            throw new LlmInvalidResponseException("LLM response does not contain a choices array.");
         }
 
         var values = choices.EnumerateArray()
@@ -111,7 +111,7 @@ public sealed class GameDialogueService
 
         if (values.Length == 0)
         {
-            throw new InvalidOperationException("LLM response returned no usable choices.");
+            throw new LlmInvalidResponseException("LLM response returned no usable choices.");
         }
 
         return values;
@@ -203,12 +203,12 @@ public sealed class GameDialogueService
         return ex is not ArgumentException;
     }
 
-    private static string SanitizeCharacterReply(string reply, string fallback)
+    private static string SanitizeCharacterReply(string reply)
     {
         var text = string.Join(' ', reply.Split(default(string[]), StringSplitOptions.RemoveEmptyEntries)).Trim();
         if (text.Length == 0 || text.Length > 60)
         {
-            return fallback;
+            throw new LlmInvalidResponseException("LLM reply was empty or too long.");
         }
 
         if (text.Any(character =>
@@ -217,11 +217,16 @@ public sealed class GameDialogueService
                 !char.IsWhiteSpace(character) &&
                 character is not '?' and not '!' and not '.' and not ',' and not '~' and not '"' and not '\'' and not '(' and not ')' and not ':' and not '-'))
         {
-            return fallback;
+            throw new LlmInvalidResponseException("LLM reply contained unsupported characters.");
         }
 
         var sentenceCount = text.Count(character => character is '?' or '!' or '.');
-        return sentenceCount > 3 ? fallback : text;
+        if (sentenceCount > 3)
+        {
+            throw new LlmInvalidResponseException("LLM reply contained too many sentences.");
+        }
+
+        return text;
     }
 
     private const string RivalSystemPrompt = """

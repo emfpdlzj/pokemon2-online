@@ -6,12 +6,6 @@
 
 현재 코드 기준으로, 완료 기준이 붙어 있던 핵심 개발 항목은 모두 반영됐다. 관련 운영/정책 내용은 `docs/save-mode-policy.md`, `docs/save-sync-policy.md`, `docs/operations-deployment.md`에 유지한다. 남은 작업은 후순위 항목과 사용자 제보를 기준으로 계속 정리한다.
 
-## 사용자 제보
-
-### LLM 기반 대화가 동작하지 않는다
-
-- 클라이언트 호출 경로, 서버 프록시 설정, API 키/모델 설정, fallback 응답 동작을 점검한다.
-
 ## 참고
 
 - LLM 운영 규칙과 응답 검증 정책은 `docs/llm-operations.md`에 기록한다.

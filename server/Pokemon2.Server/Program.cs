@@ -60,11 +60,16 @@ app.UseWebSockets(new WebSocketOptions
 
 await EnsureDatabaseAsync(app);
 
-app.MapGet("/api/health", () => Results.Ok(new
+app.MapGet("/api/health", (LlmOptions llmOptions) => Results.Ok(new
 {
     service = "pokemon2-online-server",
     status = "ok",
-    utc = DateTimeOffset.UtcNow
+    utc = DateTimeOffset.UtcNow,
+    llm = new
+    {
+        replyConfigured = llmOptions.IsConfigured(LlmOperation.Reply),
+        choicesConfigured = llmOptions.IsConfigured(LlmOperation.Choices)
+    }
 }));
 
 app.MapGet("/api/rooms", (RoomManager rooms) =>

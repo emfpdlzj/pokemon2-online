@@ -49,6 +49,32 @@ public sealed class GameDialogueServiceTests
     }
 
     [Fact]
+    public async Task GenerateReplyAsync_FallsBackWhenReplyContainsUnsupportedCharacters()
+    {
+        var client = new StubLlmTextClient("⚠️ 시스템 메시지");
+        var service = CreateService(client);
+
+        var reply = await service.GenerateReplyAsync("rival", "안녕", "user-1", CancellationToken.None);
+
+        Assert.Equal("fallback", reply.Source);
+        Assert.Equal("invalid_response", reply.Status);
+        Assert.Equal("나중에 다시 말 걸어줘!", reply.Reply);
+    }
+
+    [Fact]
+    public async Task GenerateChoicesAsync_FallsBackWhenChoicesPayloadIsMalformed()
+    {
+        var client = new StubLlmTextClient("""{"items":["하나"]}""");
+        var service = CreateService(client);
+
+        var result = await service.GenerateChoicesAsync("안녕", "user-1", CancellationToken.None);
+
+        Assert.Equal("fallback", result.Source);
+        Assert.Equal("invalid_response", result.Status);
+        Assert.Equal(3, result.Choices.Length);
+    }
+
+    [Fact]
     public async Task OpenAiCompatibleClient_ParsesChatCompletionsResponseAndUsage()
     {
         var handler = new StubHttpMessageHandler(_ =>
