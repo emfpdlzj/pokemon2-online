@@ -45,21 +45,29 @@ export function isReconnectableClose({ code, reason }) {
   return code !== 1000;
 }
 
-export function describeJoinError(status) {
+export function describeJoinError(status, { reconnecting = false } = {}) {
   switch (status) {
     case 401:
-      return "사용자 식별이 만료되어 다시 인증한 뒤 재입장해야 합니다.";
+      return reconnecting
+        ? "사용자 식별이 만료되어 자동 재입장이 중단되었습니다. 방 목록으로 돌아가 다시 입장하세요."
+        : "사용자 식별이 만료되어 다시 인증한 뒤 방에 입장해야 합니다.";
     case 404:
-      return "방을 찾을 수 없어 다시 입장할 수 없습니다.";
+      return reconnecting
+        ? "기존 방을 찾을 수 없어 자동 재입장을 계속할 수 없습니다. 방 목록에서 새 방을 고르세요."
+        : "방을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도하세요.";
     case 409:
-      return "서버가 현재 재입장을 허용하지 않았습니다.";
+      return reconnecting
+        ? "서버가 현재 재입장을 허용하지 않았습니다. 방 목록으로 돌아가 다시 입장하세요."
+        : "방이 이미 가득 찼거나 서버가 현재 입장을 허용하지 않았습니다.";
     case 502:
     case 503:
-      return "서버가 일시적으로 응답하지 않아 재입장에 실패했습니다.";
+      return reconnecting
+        ? "서버가 일시적으로 응답하지 않아 자동 재입장에 실패했습니다."
+        : "서버가 일시적으로 응답하지 않아 방 입장에 실패했습니다.";
     default:
       return status
-        ? `재입장 요청이 실패했습니다. (HTTP ${status})`
-        : "재입장 요청에 실패했습니다.";
+        ? `${reconnecting ? "재입장" : "방 입장"} 요청이 실패했습니다. (HTTP ${status})`
+        : `${reconnecting ? "재입장" : "방 입장"} 요청에 실패했습니다.`;
   }
 }
 
