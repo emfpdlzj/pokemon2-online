@@ -1,4 +1,12 @@
 import { buildFallbackChoices, sanitizeRivalChoices } from "./rivalChoices.js";
+import {
+  buildReconnectMessage,
+  describeJoinError,
+  describeMoveRejectReason,
+  describeSocketClose,
+  isReconnectableClose,
+  parseHttpStatus,
+} from "./multiplayerStatus.js";
 
 export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV || {} }) {
 const MAPS = maps;
@@ -199,6 +207,15 @@ const multiplayer = {
   battles: new Map(),
   serverTick: 0,
   lastRejectReason: "",
+  roomName: "",
+  joinRequest: null,
+  connectionState: "idle",
+  connectionMessage: "멀티플레이 연결 안 됨",
+  reconnectTimer: null,
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 3,
+  manualDisconnect: false,
+  events: [],
 };
 
 let battleRuntime = null;
@@ -279,6 +296,13 @@ const saveSlotsEl = document.getElementById("save-slots");
 const roomListEl = document.getElementById("room-list");
 const adminMetricsEl = document.getElementById("admin-metrics");
 const serverUrlInput = document.getElementById("server-url-input");
+const multiplayerPanel = document.getElementById("multiplayer-panel");
+const multiplayerRoomNameEl = document.getElementById("multiplayer-room-name");
+const multiplayerConnectionDetailEl = document.getElementById("multiplayer-connection-detail");
+const multiplayerConnectionBadgeEl = document.getElementById("multiplayer-connection-badge");
+const multiplayerPlayerListEl = document.getElementById("multiplayer-player-list");
+const multiplayerEventLogEl = document.getElementById("multiplayer-event-log");
+const multiplayerReconnectBtn = document.getElementById("multiplayer-reconnect-btn");
 
 canvas.width  = CANVAS_W;
 canvas.height = CANVAS_H;
@@ -417,6 +441,148 @@ function updateHUD() {
   } else {
     hudStarter.textContent = "파트너: 없음";
   }
+}
+
+function pushMultiplayerEvent(text, kind = "system") {
+  if (!text) return;
+  multiplayer.events.unshift({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    text,
+    kind,
+    time: new Date().toLocaleTimeString(),
+  });
+  multiplayer.events = multiplayer.events.slice(0, 8);
+  updateMultiplayerPanel();
+}
+
+function setMultiplayerConnection(stateName, message) {
+  multiplayer.connectionState = stateName;
+  multiplayer.connectionMessage = message;
+  updateMultiplayerPanel();
+}
+
+function clearMultiplayerReconnectTimer() {
+  if (multiplayer.reconnectTimer) {
+    clearTimeout(multiplayer.reconnectTimer);
+    multiplayer.reconnectTimer = null;
+  }
+}
+
+function rememberMultiplayerJoin(room, playerName) {
+  multiplayer.joinRequest = room?.roomId ? {
+    roomId: room.roomId,
+    playerName: playerName || getEnteredPlayerName(),
+  } : null;
+  multiplayer.roomName = room?.roomName || multiplayer.roomName || "멀티 방";
+}
+
+function renderMultiplayerPlayers() {
+  const players = [...multiplayer.players.values()].sort((left, right) => left.name.localeCompare(right.name, "ko"));
+  if (players.length === 0) {
+    multiplayerPlayerListEl.innerHTML = `<div class="multiplayer-empty">아직 동기화된 플레이어 정보가 없습니다.</div>`;
+    return;
+  }
+
+  multiplayerPlayerListEl.innerHTML = players.map(player => `
+    <div class="multiplayer-player ${player.playerId === multiplayer.playerId ? "self" : ""}">
+      <strong>${player.name}${player.playerId === multiplayer.playerId ? " (나)" : ""}</strong>
+      <span>${player.position ? `${player.position.x}, ${player.position.y}` : "위치 대기 중"}</span>
+    </div>
+  `).join("");
+}
+
+function renderMultiplayerEvents() {
+  if (multiplayer.events.length === 0) {
+    multiplayerEventLogEl.innerHTML = `<div class="multiplayer-empty">입장, 퇴장, 채팅, 재접속 기록이 여기에 표시됩니다.</div>`;
+    return;
+  }
+
+  multiplayerEventLogEl.innerHTML = multiplayer.events.map(event => `
+    <div class="multiplayer-event ${event.kind}">
+      <time>${event.time}</time>
+      <div>${event.text}</div>
+    </div>
+  `).join("");
+}
+
+function updateMultiplayerPanel() {
+  const active = state.mode === "multi";
+  multiplayerPanel.style.display = active ? "block" : "none";
+  if (!active) return;
+
+  multiplayerRoomNameEl.textContent = multiplayer.roomName
+    ? `${multiplayer.roomName}${state.roomId ? ` · ${state.roomId}` : ""}`
+    : "멀티 방";
+  multiplayerConnectionDetailEl.textContent = `${multiplayer.connectionMessage} · 플레이어 ${multiplayer.players.size}명`;
+  multiplayerConnectionBadgeEl.dataset.state = multiplayer.connectionState;
+  multiplayerConnectionBadgeEl.textContent = ({
+    idle: "대기",
+    connecting: "연결 중",
+    reconnecting: "재접속",
+    connected: "연결됨",
+    disconnected: "끊김",
+    error: "오류",
+  })[multiplayer.connectionState] || "대기";
+  multiplayerReconnectBtn.disabled = multiplayer.connectionState === "connecting" || multiplayer.connectionState === "reconnecting";
+  renderMultiplayerPlayers();
+  renderMultiplayerEvents();
+}
+
+async function rejoinMultiplayer({ automatic = false } = {}) {
+  if (!multiplayer.joinRequest?.roomId) {
+    setMultiplayerConnection("error", "다시 입장할 방 정보가 없어 재접속을 진행할 수 없습니다.");
+    return false;
+  }
+
+  setMultiplayerConnection(automatic ? "reconnecting" : "connecting", automatic ? "방에 다시 연결하는 중..." : "방에 다시 입장하는 중...");
+  const joined = await fetchJson(`${apiBase}/api/rooms/${multiplayer.joinRequest.roomId}/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ playerName: multiplayer.joinRequest.playerName }),
+  }, { requireIdentity: true });
+
+  rememberMultiplayerJoin(joined.room, joined.playerName || multiplayer.joinRequest.playerName);
+  connectMultiplayer({
+    wsUrl: joined.wsUrl,
+    roomId: joined.room.roomId,
+    roomName: joined.room.roomName,
+    playerName: joined.playerName || multiplayer.joinRequest.playerName,
+    reconnecting: automatic,
+  });
+  return true;
+}
+
+function scheduleMultiplayerReconnect() {
+  clearMultiplayerReconnectTimer();
+  if (!multiplayer.joinRequest?.roomId) {
+    setMultiplayerConnection("error", "다시 연결할 방 정보가 없어 자동 재접속을 중단했습니다.");
+    return;
+  }
+
+  const nextAttempt = multiplayer.reconnectAttempts + 1;
+  if (nextAttempt > multiplayer.maxReconnectAttempts) {
+    setMultiplayerConnection("disconnected", "자동 재접속 횟수를 모두 사용했습니다. 재입장 버튼으로 다시 시도하세요.");
+    pushMultiplayerEvent("자동 재접속 한도를 넘겨 수동 재입장이 필요합니다.", "warning");
+    return;
+  }
+
+  const delayMs = Math.min(4000, 1000 * (2 ** (nextAttempt - 1)));
+  setMultiplayerConnection("reconnecting", buildReconnectMessage({
+    attempt: nextAttempt,
+    maxAttempts: multiplayer.maxReconnectAttempts,
+    delayMs,
+  }));
+  multiplayer.reconnectTimer = setTimeout(async () => {
+    multiplayer.reconnectTimer = null;
+    multiplayer.reconnectAttempts = nextAttempt;
+    try {
+      await rejoinMultiplayer({ automatic: true });
+    } catch (error) {
+      const message = describeJoinError(parseHttpStatus(error));
+      pushMultiplayerEvent(message, "warning");
+      scheduleMultiplayerReconnect();
+    }
+  }, delayMs);
 }
 
 // ============================================================
@@ -1864,11 +2030,21 @@ async function fetchJson(url, options, { requireIdentity = false } = {}) {
   return res.json();
 }
 
-function connectMultiplayer(wsUrl) {
-  disconnectMultiplayer();
+function connectMultiplayer({ wsUrl, roomId = null, roomName = "", playerName = "", reconnecting = false } = {}) {
+  disconnectMultiplayer({ manual: true, preserveJoinRequest: true, preserveEvents: true });
   if (!wsUrl) return;
 
+  if (roomId) state.roomId = roomId;
+  if (roomName) multiplayer.roomName = roomName;
+  if (state.roomId) {
+    multiplayer.joinRequest = {
+      roomId: state.roomId,
+      playerName: playerName || state.playerName || getEnteredPlayerName(),
+    };
+  }
+
   const socket = new WebSocket(wsUrl);
+  multiplayer.manualDisconnect = false;
   multiplayer.socket = socket;
   multiplayer.playerId = null;
   multiplayer.moveSequence = 0;
@@ -1878,6 +2054,11 @@ function connectMultiplayer(wsUrl) {
   multiplayer.battles = new Map();
   multiplayer.serverTick = 0;
   multiplayer.lastRejectReason = "";
+  setMultiplayerConnection(reconnecting ? "reconnecting" : "connecting", reconnecting ? "방에 다시 연결하는 중..." : "멀티 방에 연결하는 중...");
+
+  socket.addEventListener("open", () => {
+    setMultiplayerConnection(reconnecting ? "reconnecting" : "connecting", reconnecting ? "서버가 스냅샷을 보내는 중..." : "입장 정보를 확인하는 중...");
+  });
 
   socket.addEventListener("message", event => {
     let envelope;
@@ -1889,6 +2070,9 @@ function connectMultiplayer(wsUrl) {
 
     if (envelope.type === "joined") {
       multiplayer.playerId = envelope.payload?.playerId || null;
+      multiplayer.reconnectAttempts = 0;
+      setMultiplayerConnection("connected", reconnecting ? "방 연결을 복구했습니다." : "멀티 방 연결이 완료되었습니다.");
+      pushMultiplayerEvent(reconnecting ? "방 연결을 복구했습니다." : "멀티플레이 방에 입장했습니다.");
       return;
     }
 
@@ -1904,6 +2088,21 @@ function connectMultiplayer(wsUrl) {
 
     if (envelope.type === "move_rejected") {
       applyMoveRejected(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "player_joined") {
+      applyPlayerJoined(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "player_left") {
+      applyPlayerLeft(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "chat") {
+      applyRoomChat(envelope.payload);
       return;
     }
 
@@ -1929,15 +2128,28 @@ function connectMultiplayer(wsUrl) {
     }
   });
 
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", event => {
     if (multiplayer.socket === socket) {
       multiplayer.socket = null;
       multiplayer.playerId = null;
+      const message = describeSocketClose(event);
+      pushMultiplayerEvent(message, "warning");
+      if (state.mode === "multi" && !multiplayer.manualDisconnect && isReconnectableClose(event)) {
+        scheduleMultiplayerReconnect();
+        return;
+      }
+      setMultiplayerConnection("disconnected", message);
     }
+  });
+
+  socket.addEventListener("error", () => {
+    setMultiplayerConnection("error", "멀티플레이 연결 중 오류가 발생했습니다.");
   });
 }
 
-function disconnectMultiplayer() {
+function disconnectMultiplayer({ manual = true, preserveJoinRequest = false, preserveEvents = false } = {}) {
+  clearMultiplayerReconnectTimer();
+  multiplayer.manualDisconnect = manual;
   if (multiplayer.socket && multiplayer.socket.readyState <= WebSocket.OPEN) {
     multiplayer.socket.close();
   }
@@ -1946,6 +2158,18 @@ function disconnectMultiplayer() {
   multiplayer.players = new Map();
   multiplayer.monsters = new Map();
   multiplayer.battles = new Map();
+  multiplayer.lastRejectReason = "";
+  if (!preserveJoinRequest) {
+    multiplayer.joinRequest = null;
+    multiplayer.roomName = "";
+  }
+  if (!preserveEvents) {
+    multiplayer.events = [];
+  }
+  if (!preserveJoinRequest) {
+    setMultiplayerConnection("idle", "멀티플레이 연결 안 됨");
+  }
+  updateMultiplayerPanel();
 }
 
 function sendMultiplayer(type, payload) {
@@ -1991,6 +2215,7 @@ function applyServerSnapshot(snapshot) {
     const monster = multiplayer.monsters.get(myBattle.monsterId);
     battleRuntime.syncServerBattle(myBattle, monster);
   }
+  updateMultiplayerPanel();
 }
 
 function applyServerPlayerMoved(payload) {
@@ -2005,6 +2230,9 @@ function applyServerPlayerMoved(payload) {
 
 function applyMoveRejected(payload) {
   multiplayer.lastRejectReason = payload?.reason || "";
+  const message = describeMoveRejectReason(multiplayer.lastRejectReason);
+  setMultiplayerConnection("connected", message);
+  pushMultiplayerEvent(message, "warning");
   if (!payload?.serverPosition) return;
   state.px = payload.serverPosition.x;
   state.py = payload.serverPosition.y;
@@ -2012,6 +2240,34 @@ function applyMoveRejected(payload) {
   renderY = state.py * TILE;
   moveState.active = false;
   moveState.arrived = false;
+}
+
+function applyPlayerJoined(payload) {
+  if (!payload?.playerId) return;
+  const current = multiplayer.players.get(payload.playerId) || { playerId: payload.playerId };
+  multiplayer.players.set(payload.playerId, {
+    ...current,
+    ...payload,
+  });
+  if (payload.playerId !== multiplayer.playerId) {
+    pushMultiplayerEvent(`${payload.name || "플레이어"} 님이 방에 들어왔습니다.`);
+  }
+  updateMultiplayerPanel();
+}
+
+function applyPlayerLeft(payload) {
+  if (!payload?.playerId) return;
+  multiplayer.players.delete(payload.playerId);
+  pushMultiplayerEvent(`${payload.name || "플레이어"} 님이 방을 나갔습니다.`, "warning");
+  updateMultiplayerPanel();
+}
+
+function applyRoomChat(payload) {
+  if (!payload?.playerId || !payload?.message) return;
+  const speaker = payload.playerId === multiplayer.playerId
+    ? "나"
+    : multiplayer.players.get(payload.playerId)?.name || payload.playerId;
+  pushMultiplayerEvent(`[${speaker}] ${payload.message}`, "chat");
 }
 
 function sendServerAttack(monsterId, skillId) {
@@ -2068,7 +2324,7 @@ function getEnteredPlayerName() {
   return nameVal || "주인공";
 }
 
-function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null, wsUrl = null } = {}) {
+function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null, roomName = null, wsUrl = null } = {}) {
   activeSlotNumber = slotNumber;
   activeSaveId = saveId;
   writeScopedStorageValue(ACTIVE_SLOT_KEY, String(activeSlotNumber));
@@ -2082,8 +2338,13 @@ function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState 
     resetState(getEnteredPlayerName(), mode, roomId);
   }
 
-  if (state.mode === "multi") connectMultiplayer(wsUrl);
-  else disconnectMultiplayer();
+  if (state.mode === "multi") {
+    if (roomId) state.roomId = roomId;
+    if (roomId) rememberMultiplayerJoin({ roomId, roomName }, state.playerName);
+    connectMultiplayer({ wsUrl, roomId, roomName, playerName: state.playerName });
+  } else {
+    disconnectMultiplayer();
+  }
 
   startScreen.style.display = "none";
   gameWrapper.style.display = "flex";
@@ -2093,6 +2354,7 @@ function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState 
   renderX = state.px * TILE;
   renderY = state.py * TILE;
   updateHUD();
+  updateMultiplayerPanel();
   saveGame();
   requestAnimationFrame(gameLoop);
 
@@ -2167,13 +2429,23 @@ async function renderRooms() {
         <div class="room-meta">${room.mapName} · ${room.playerCount}/${room.maxPlayers}명</div>
       `;
       button.onclick = async () => {
-        const joined = await fetchJson(`${apiBase}/api/rooms/${room.roomId}/join`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ playerName: getEnteredPlayerName() }),
-        }, { requireIdentity: true });
-        setStatus(`멀티 방 참가: ${joined.room.roomName}`);
-        beginGame({ mode: "multi", slotNumber: 1, roomId: joined.room.roomId, wsUrl: joined.wsUrl });
+        try {
+          const joined = await fetchJson(`${apiBase}/api/rooms/${room.roomId}/join`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ playerName: getEnteredPlayerName() }),
+          }, { requireIdentity: true });
+          setStatus(`멀티 방 참가: ${joined.room.roomName}`);
+          beginGame({
+            mode: "multi",
+            slotNumber: 1,
+            roomId: joined.room.roomId,
+            roomName: joined.room.roomName,
+            wsUrl: joined.wsUrl,
+          });
+        } catch (error) {
+          setStatus(describeJoinError(parseHttpStatus(error)));
+        }
       };
       roomListEl.appendChild(button);
     });
@@ -2266,6 +2538,16 @@ document.getElementById("create-room-btn").addEventListener("click", async () =>
     await renderRooms();
   } catch {
     setStatus("방 생성에 실패했습니다.");
+  }
+});
+multiplayerReconnectBtn.addEventListener("click", async () => {
+  try {
+    multiplayer.reconnectAttempts = 0;
+    await rejoinMultiplayer({ automatic: false });
+  } catch (error) {
+    const message = describeJoinError(parseHttpStatus(error));
+    setMultiplayerConnection("error", message);
+    pushMultiplayerEvent(message, "error");
   }
 });
 
