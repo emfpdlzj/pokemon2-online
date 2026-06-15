@@ -41,6 +41,7 @@ public sealed class MapCatalogTests
 
         Assert.False(map.CanEnter(new Position(0, 1)));
         Assert.False(map.CanEnter(new Position(5, 5)));
+        Assert.False(map.CanEnter(new Position(5, 1)));
         Assert.False(map.CanEnter(new Position(3, 9)));
         Assert.True(map.CanEnter(new Position(19, 13)));
         Assert.True(map.CanEnter(new Position(9, 9)));

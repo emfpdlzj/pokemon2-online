@@ -13,6 +13,7 @@ import {
   normalizeStoredSaveEnvelope,
   resolveSaveConflict,
 } from "./saveSync.js";
+import { isBlockedTile } from "./tileCollision.js";
 
 export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV || {} }) {
 const MAPS = maps;
@@ -1464,7 +1465,7 @@ function tryMove(dx, dy) {
   const tile = getTile(map, nx, ny);
   const blockedByNpc = map.npcs?.some(n => n.tx === nx && n.ty === ny);
 
-  if (tile === 1) return false; // 벽
+  if (isBlockedTile(tile)) return false; // 벽/물처럼 막힌 지형
   if (blockedByNpc) return false; // NPC/오브젝트 위로는 올라갈 수 없음
 
   moveState.active = true;
