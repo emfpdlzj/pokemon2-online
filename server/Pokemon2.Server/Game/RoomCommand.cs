@@ -7,11 +7,12 @@ public abstract record RoomCommand
 {
     public sealed record Join(
         string PlayerId,
+        string SessionId,
         string PlayerName,
         WebSocket Socket,
         CancellationToken CancellationToken) : RoomCommand;
 
-    public sealed record Leave(string PlayerId) : RoomCommand;
+    public sealed record Leave(string PlayerId, string SessionId) : RoomCommand;
 
     public sealed record Move(
         string PlayerId,

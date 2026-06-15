@@ -116,6 +116,27 @@ public sealed class RoomActorTests
         Assert.True(result.Won);
     }
 
+    [Fact]
+    public async Task Rejoin_WithSamePlayerId_PreservesPositionAndIgnoresOldLeave()
+    {
+        var room = CreateRoom();
+        var firstSocket = new CapturingWebSocket();
+        await JoinAsync(room, firstSocket);
+
+        await room.EnqueueAsync(new RoomCommand.Move("p1", Direction.Right, 1, CancellationToken.None));
+        await firstSocket.WaitForEnvelopeAsync("player_moved");
+
+        var reconnectSocket = new CapturingWebSocket();
+        await room.EnqueueAsync(new RoomCommand.Join("p1", "session-2", "tester", reconnectSocket, CancellationToken.None));
+        var joined = await reconnectSocket.WaitForEnvelopeAsync("joined");
+
+        Assert.Equal(2, joined["payload"]?["position"]?["x"]?.GetValue<int>());
+        Assert.Equal(1, joined["payload"]?["position"]?["y"]?.GetValue<int>());
+
+        await room.EnqueueAsync(new RoomCommand.Leave("p1", "session-1"));
+        Assert.Equal(1, room.ToSummary().PlayerCount);
+    }
+
     private static RoomActor CreateRoom(IBattleResultStore? store = null)
     {
         var map = new GameMap("test-map", "Test Map", 8, 8, Array.Empty<Position>())
@@ -128,7 +149,7 @@ public sealed class RoomActorTests
 
     private static async Task JoinAsync(RoomActor room, CapturingWebSocket socket, string playerId = "p1")
     {
-        await room.EnqueueAsync(new RoomCommand.Join(playerId, "tester", socket, CancellationToken.None));
+        await room.EnqueueAsync(new RoomCommand.Join(playerId, "session-1", "tester", socket, CancellationToken.None));
         await socket.WaitForEnvelopeAsync("joined");
     }
 

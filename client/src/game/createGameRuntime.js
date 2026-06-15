@@ -1671,10 +1671,14 @@ function triggerAutoEvent(eventKey) {
 //  저장 / 불러오기
 // ============================================================
 const API_BASE_KEY = "pokemonDemoApiBase";
+const PLAYER_IDENTITY_KEY = "pokemonDemoPlayerIdentity";
+const ACTIVE_SAVE_KEY = "pokemonDemoActiveSaveId";
+const ACTIVE_SLOT_KEY = "pokemonDemoActiveSlot";
 const DEFAULT_API_BASE = CLIENT_ENV.POKEMON2_API_BASE || "";
 let apiBase = localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE;
-let activeSaveId = localStorage.getItem("pokemonDemoActiveSaveId") || null;
-let activeSlotNumber = Number(localStorage.getItem("pokemonDemoActiveSlot") || "1");
+let playerIdentity = readStoredPlayerIdentity();
+let activeSaveId = readScopedStorageValue(ACTIVE_SAVE_KEY) || (playerIdentity ? null : localStorage.getItem(ACTIVE_SAVE_KEY)) || null;
+let activeSlotNumber = Number(readScopedStorageValue(ACTIVE_SLOT_KEY) || localStorage.getItem(ACTIVE_SLOT_KEY) || "1");
 let saveStartedAt = Date.now();
 let saveWriteTimer = null;
 
@@ -1693,7 +1697,72 @@ function resetState(playerName, mode = "single", roomId = null) {
 }
 
 function localSaveKey() {
-  return `pokemonDemo:${state.mode || "single"}:${activeSlotNumber}`;
+  return `pokemonDemo:${playerIdentity?.userId || "shared"}:${state.mode || "single"}:${activeSlotNumber}`;
+}
+
+function readStoredPlayerIdentity() {
+  const raw = localStorage.getItem(PLAYER_IDENTITY_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.userId === "string" && typeof parsed.token === "string") {
+      return { userId: parsed.userId, token: parsed.token };
+    }
+  } catch {}
+  return null;
+}
+
+function readScopedStorageValue(key) {
+  if (!playerIdentity?.userId) return null;
+  return localStorage.getItem(`${key}:${playerIdentity.userId}`);
+}
+
+function writeScopedStorageValue(key, value) {
+  if (!playerIdentity?.userId) return;
+  const scopedKey = `${key}:${playerIdentity.userId}`;
+  if (value == null || value === "") {
+    localStorage.removeItem(scopedKey);
+    return;
+  }
+  localStorage.setItem(scopedKey, value);
+}
+
+function buildIdentityHeaders(headers = {}) {
+  if (!playerIdentity?.token) return headers;
+  return {
+    ...headers,
+    "X-Player-Identity": playerIdentity.token,
+  };
+}
+
+function clearPlayerIdentity() {
+  playerIdentity = null;
+  localStorage.removeItem(PLAYER_IDENTITY_KEY);
+}
+
+async function ensurePlayerIdentity() {
+  if (playerIdentity?.userId && playerIdentity?.token) {
+    return playerIdentity;
+  }
+
+  const res = await fetch(`${apiBase}/api/player/identity`);
+  if (!res.ok) {
+    throw new Error(`identity failed ${res.status}`);
+  }
+
+  const issued = await res.json();
+  if (!issued?.userId || !issued?.token) {
+    throw new Error("identity payload invalid");
+  }
+
+  playerIdentity = {
+    userId: issued.userId,
+    token: issued.token,
+  };
+  localStorage.setItem(PLAYER_IDENTITY_KEY, JSON.stringify(playerIdentity));
+  activeSaveId = readScopedStorageValue(ACTIVE_SAVE_KEY) || null;
+  activeSlotNumber = Number(readScopedStorageValue(ACTIVE_SLOT_KEY) || String(activeSlotNumber || 1));
+  return playerIdentity;
 }
 
 function buildSavePayload() {
@@ -1758,20 +1827,42 @@ function applySavedState(saved) {
 }
 
 async function syncSaveToServer(payload) {
-  const url = activeSaveId ? `${apiBase}/api/saves/${activeSaveId}` : `${apiBase}/api/saves`;
-  const res = await fetch(url, {
+  await ensurePlayerIdentity();
+  const buildRequest = () => ({
     method: activeSaveId ? "PUT" : "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildIdentityHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
+  let res = await fetch(activeSaveId ? `${apiBase}/api/saves/${activeSaveId}` : `${apiBase}/api/saves`, buildRequest());
+  if (res.status === 404 && activeSaveId) {
+    activeSaveId = null;
+    writeScopedStorageValue(ACTIVE_SAVE_KEY, null);
+    res = await fetch(`${apiBase}/api/saves`, buildRequest());
+  }
+  if (res.status === 401 && playerIdentity?.token) {
+    clearPlayerIdentity();
+    await ensurePlayerIdentity();
+    res = await fetch(activeSaveId ? `${apiBase}/api/saves/${activeSaveId}` : `${apiBase}/api/saves`, buildRequest());
+  }
   if (!res.ok) throw new Error(`save failed ${res.status}`);
   const saved = await res.json();
   activeSaveId = saved.id;
-  localStorage.setItem("pokemonDemoActiveSaveId", activeSaveId);
+  writeScopedStorageValue(ACTIVE_SAVE_KEY, activeSaveId);
 }
 
-async function fetchJson(url, options) {
-  const res = await fetch(url, options);
+async function fetchJson(url, options, { requireIdentity = false } = {}) {
+  const requestOptions = options ? { ...options } : {};
+  if (requireIdentity) {
+    await ensurePlayerIdentity();
+    requestOptions.headers = buildIdentityHeaders(requestOptions.headers || {});
+  }
+  let res = await fetch(url, requestOptions);
+  if (requireIdentity && res.status === 401 && playerIdentity?.token) {
+    clearPlayerIdentity();
+    await ensurePlayerIdentity();
+    requestOptions.headers = buildIdentityHeaders(options?.headers || {});
+    res = await fetch(url, requestOptions);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -1983,9 +2074,8 @@ function getEnteredPlayerName() {
 function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null, wsUrl = null } = {}) {
   activeSlotNumber = slotNumber;
   activeSaveId = saveId;
-  localStorage.setItem("pokemonDemoActiveSlot", String(activeSlotNumber));
-  if (activeSaveId) localStorage.setItem("pokemonDemoActiveSaveId", activeSaveId);
-  else localStorage.removeItem("pokemonDemoActiveSaveId");
+  writeScopedStorageValue(ACTIVE_SLOT_KEY, String(activeSlotNumber));
+  writeScopedStorageValue(ACTIVE_SAVE_KEY, activeSaveId);
 
   if (savedState) {
     applySavedState(savedState);
@@ -2024,7 +2114,7 @@ async function renderSaveSlots() {
   saveSlotsEl.innerHTML = "";
 
   try {
-    const saves = await fetchJson(`${apiBase}/api/saves?mode=single`);
+    const saves = await fetchJson(`${apiBase}/api/saves?mode=single`, undefined, { requireIdentity: true });
     const bySlot = new Map(saves.map(save => [save.slotNumber, save]));
     for (let slot = 1; slot <= 3; slot++) {
       const save = bySlot.get(slot);
@@ -2045,7 +2135,7 @@ async function renderSaveSlots() {
           beginGame({ mode: "single", slotNumber: slot });
           return;
         }
-        const detail = await fetchJson(`${apiBase}/api/saves/${save.id}`);
+        const detail = await fetchJson(`${apiBase}/api/saves/${save.id}`, undefined, { requireIdentity: true });
         beginGame({ mode: "single", slotNumber: slot, saveId: detail.id, savedState: detail.gameState });
       };
       saveSlotsEl.appendChild(button);
@@ -2057,10 +2147,10 @@ async function renderSaveSlots() {
     button.className = "slot-card";
     button.type = "button";
     button.innerHTML = `<div class="slot-title">로컬 저장</div><div class="slot-meta">브라우저에 저장된 진행도를 불러옵니다.</div>`;
-    button.onclick = () => {
-      loadGame();
-      beginGame({ mode: state.mode || "single", slotNumber: activeSlotNumber, savedState: { ...state } });
-    };
+      button.onclick = () => {
+        loadGame();
+        beginGame({ mode: state.mode || "single", slotNumber: activeSlotNumber, savedState: { ...state } });
+      };
     saveSlotsEl.appendChild(button);
   }
 }
@@ -2084,7 +2174,7 @@ async function renderRooms() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ playerName: getEnteredPlayerName() }),
-        });
+        }, { requireIdentity: true });
         setStatus(`멀티 방 참가: ${joined.room.roomName}`);
         beginGame({ mode: "multi", slotNumber: 1, roomId: joined.room.roomId, wsUrl: joined.wsUrl });
       };
