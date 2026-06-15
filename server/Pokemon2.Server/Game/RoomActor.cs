@@ -154,18 +154,50 @@ public sealed class RoomActor
 
     private async Task HandleJoinAsync(RoomCommand.Join command)
     {
-        if (_players.Count >= 4)
+        var isReconnect = _players.TryGetValue(command.PlayerId, out var existingSession);
+        if (!isReconnect && _players.Count >= 4)
         {
             await command.Socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Room is full", command.CancellationToken);
             return;
         }
 
-        var occupied = _players.Values.Select(player => player.Position).ToHashSet();
-        var spawn = FindSpawnPosition(occupied);
-        var session = new PlayerSession(command.PlayerId, command.PlayerName, command.Socket, spawn);
+        Position spawn;
+        PlayerSession session;
+        if (existingSession is not null)
+        {
+            try
+            {
+                if (existingSession.Socket.State == WebSocketState.Open)
+                {
+                    await existingSession.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Reconnected from a newer session.", CancellationToken.None);
+                }
+            }
+            catch
+            {
+                // Ignore old-socket close failures during reconnect replacement.
+            }
+
+            session = new PlayerSession(command.PlayerId, command.SessionId, command.PlayerName, command.Socket, existingSession.Position)
+            {
+                Facing = existingSession.Facing,
+                LastSequence = existingSession.LastSequence,
+                LastMoveAt = existingSession.LastMoveAt
+            };
+            spawn = session.Position;
+        }
+        else
+        {
+            var occupied = _players.Values.Select(player => player.Position).ToHashSet();
+            spawn = FindSpawnPosition(occupied);
+            session = new PlayerSession(command.PlayerId, command.SessionId, command.PlayerName, command.Socket, spawn);
+        }
+
         _players[session.PlayerId] = session;
         _snapshotDirty = true;
-        _metrics.IncrementJoined();
+        if (!isReconnect)
+        {
+            _metrics.IncrementJoined();
+        }
 
         await session.SendJsonAsync(new ServerEnvelope("joined", new
         {
@@ -181,7 +213,12 @@ public sealed class RoomActor
 
     private async Task HandleLeaveAsync(RoomCommand.Leave command)
     {
-        if (_players.Remove(command.PlayerId, out var session))
+        if (!_players.TryGetValue(command.PlayerId, out var session) || session.ConnectionId != command.SessionId)
+        {
+            return;
+        }
+
+        if (_players.Remove(command.PlayerId, out session))
         {
             _snapshotDirty = true;
             _metrics.IncrementLeft();

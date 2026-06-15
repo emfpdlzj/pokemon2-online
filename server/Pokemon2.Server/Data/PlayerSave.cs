@@ -3,6 +3,7 @@ namespace Pokemon2.Server.Data;
 public sealed class PlayerSave
 {
     public Guid Id { get; set; }
+    public string UserId { get; set; } = "";
     public int SlotNumber { get; set; }
     public string Mode { get; set; } = "single";
     public string PlayerName { get; set; } = "주인공";

@@ -8,6 +8,11 @@ public sealed record SaveStarterDto(
     int? Level,
     int? CurrentHp);
 
+public sealed record PlayerIdentityResponse(
+    string UserId,
+    string Token,
+    DateTimeOffset IssuedAt);
+
 public sealed record UpsertSaveRequest(
     int SlotNumber,
     string? Mode,

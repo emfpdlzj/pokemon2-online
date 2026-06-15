@@ -17,6 +17,7 @@ public sealed class GameDbContext : DbContext
         save.ToTable("player_saves");
         save.HasKey(x => x.Id);
         save.Property(x => x.Id).HasColumnName("id");
+        save.Property(x => x.UserId).HasColumnName("user_id").HasMaxLength(80);
         save.Property(x => x.SlotNumber).HasColumnName("slot_number");
         save.Property(x => x.Mode).HasColumnName("mode").HasMaxLength(24);
         save.Property(x => x.PlayerName).HasColumnName("player_name").HasMaxLength(40);
@@ -32,7 +33,7 @@ public sealed class GameDbContext : DbContext
         save.Property(x => x.GameStateJson).HasColumnName("game_state_json").HasColumnType("jsonb");
         save.Property(x => x.CreatedAt).HasColumnName("created_at");
         save.Property(x => x.UpdatedAt).HasColumnName("updated_at");
-        save.HasIndex(x => new { x.Mode, x.SlotNumber }).IsUnique();
+        save.HasIndex(x => new { x.UserId, x.Mode, x.SlotNumber }).IsUnique();
 
         var battle = modelBuilder.Entity<BattleResult>();
         battle.ToTable("battle_results");

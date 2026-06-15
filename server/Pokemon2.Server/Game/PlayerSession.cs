@@ -7,15 +7,17 @@ public sealed class PlayerSession
 {
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
-    public PlayerSession(string playerId, string name, WebSocket socket, Position position)
+    public PlayerSession(string playerId, string connectionId, string name, WebSocket socket, Position position)
     {
         PlayerId = playerId;
+        ConnectionId = connectionId;
         Name = name;
         Socket = socket;
         Position = position;
     }
 
     public string PlayerId { get; }
+    public string ConnectionId { get; }
     public string Name { get; }
     public WebSocket Socket { get; }
     public Position Position { get; set; }

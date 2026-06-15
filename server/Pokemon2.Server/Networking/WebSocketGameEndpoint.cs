@@ -17,22 +17,22 @@ public sealed class WebSocketGameEndpoint
         _logger = logger;
     }
 
-    public async Task HandleAsync(HttpContext context, string? roomId, string? playerName)
+    public async Task HandleAsync(HttpContext context, string? roomId, string? playerName, string userId)
     {
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        var playerId = Guid.NewGuid().ToString("N");
-        var safeName = string.IsNullOrWhiteSpace(playerName) ? $"player-{playerId[..4]}" : playerName.Trim()[..Math.Min(playerName.Trim().Length, 16)];
+        var sessionId = Guid.NewGuid().ToString("N");
+        var safeName = string.IsNullOrWhiteSpace(playerName) ? $"player-{userId[^4..]}" : playerName.Trim()[..Math.Min(playerName.Trim().Length, 16)];
         var room = _rooms.GetOrCreate(roomId);
 
-        await room.EnqueueAsync(new RoomCommand.Join(playerId, safeName, socket, context.RequestAborted));
+        await room.EnqueueAsync(new RoomCommand.Join(userId, sessionId, safeName, socket, context.RequestAborted));
 
         try
         {
-            await ReceiveLoopAsync(socket, room, playerId, context.RequestAborted);
+            await ReceiveLoopAsync(socket, room, userId, context.RequestAborted);
         }
         finally
         {
-            await room.EnqueueAsync(new RoomCommand.Leave(playerId));
+            await room.EnqueueAsync(new RoomCommand.Leave(userId, sessionId));
         }
     }
 
