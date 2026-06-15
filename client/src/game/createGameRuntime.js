@@ -293,7 +293,11 @@ const multiMenuPanel = document.getElementById("multi-menu-panel");
 const settingsPanel = document.getElementById("settings-panel");
 const adminPanel = document.getElementById("admin-panel");
 const saveSlotsEl = document.getElementById("save-slots");
+const saveModeSingleBtn = document.getElementById("save-mode-single-btn");
+const saveModeMultiBtn = document.getElementById("save-mode-multi-btn");
 const roomListEl = document.getElementById("room-list");
+const multiSaveSummaryEl = document.getElementById("multi-save-summary");
+const multiSaveSlotsEl = document.getElementById("multi-save-slots");
 const adminMetricsEl = document.getElementById("admin-metrics");
 const serverUrlInput = document.getElementById("server-url-input");
 const multiplayerPanel = document.getElementById("multiplayer-panel");
@@ -1837,11 +1841,13 @@ const API_BASE_KEY = "pokemonDemoApiBase";
 const PLAYER_IDENTITY_KEY = "pokemonDemoPlayerIdentity";
 const ACTIVE_SAVE_KEY = "pokemonDemoActiveSaveId";
 const ACTIVE_SLOT_KEY = "pokemonDemoActiveSlot";
+const ACTIVE_SAVE_MODE_KEY = "pokemonDemoActiveSaveMode";
 const DEFAULT_API_BASE = CLIENT_ENV.POKEMON2_API_BASE || "";
 let apiBase = localStorage.getItem(API_BASE_KEY) || DEFAULT_API_BASE;
 let playerIdentity = readStoredPlayerIdentity();
-let activeSaveId = readScopedStorageValue(ACTIVE_SAVE_KEY) || (playerIdentity ? null : localStorage.getItem(ACTIVE_SAVE_KEY)) || null;
-let activeSlotNumber = Number(readScopedStorageValue(ACTIVE_SLOT_KEY) || localStorage.getItem(ACTIVE_SLOT_KEY) || "1");
+let selectedSaveMode = normalizeSaveMode(readScopedStorageValue(ACTIVE_SAVE_MODE_KEY) || localStorage.getItem(ACTIVE_SAVE_MODE_KEY) || "single");
+let activeSaveId = readSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode) || null;
+let activeSlotNumber = Number(readSaveContextValue(ACTIVE_SLOT_KEY, selectedSaveMode) || "1");
 let saveStartedAt = Date.now();
 let saveWriteTimer = null;
 
@@ -1861,6 +1867,60 @@ function resetState(playerName, mode = "single", roomId = null) {
 
 function localSaveKey() {
   return `pokemonDemo:${playerIdentity?.userId || "shared"}:${state.mode || "single"}:${activeSlotNumber}`;
+}
+
+function normalizeSaveMode(mode) {
+  return mode === "multi" ? "multi" : "single";
+}
+
+function saveContextKey(key, mode) {
+  return `${key}:${normalizeSaveMode(mode)}`;
+}
+
+function readSettingValue(key) {
+  return readScopedStorageValue(key) || localStorage.getItem(key);
+}
+
+function writeSettingValue(key, value) {
+  if (playerIdentity?.userId) {
+    writeScopedStorageValue(key, value);
+    if (value == null || value === "") {
+      localStorage.removeItem(key);
+    }
+    return;
+  }
+
+  if (value == null || value === "") {
+    localStorage.removeItem(key);
+    return;
+  }
+
+  localStorage.setItem(key, value);
+}
+
+function readSaveContextValue(key, mode) {
+  return readSettingValue(saveContextKey(key, mode));
+}
+
+function writeSaveContextValue(key, mode, value) {
+  writeSettingValue(saveContextKey(key, mode), value);
+}
+
+function setActiveSaveContext(mode, { slotNumber = null, saveId } = {}) {
+  selectedSaveMode = normalizeSaveMode(mode);
+  writeSettingValue(ACTIVE_SAVE_MODE_KEY, selectedSaveMode);
+
+  const nextSlot = slotNumber ?? Number(readSaveContextValue(ACTIVE_SLOT_KEY, selectedSaveMode) || "1");
+  activeSlotNumber = Math.min(3, Math.max(1, Number(nextSlot) || 1));
+  writeSaveContextValue(ACTIVE_SLOT_KEY, selectedSaveMode, String(activeSlotNumber));
+
+  if (saveId !== undefined) {
+    activeSaveId = saveId;
+    writeSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode, activeSaveId);
+    return;
+  }
+
+  activeSaveId = readSaveContextValue(ACTIVE_SAVE_KEY, selectedSaveMode) || null;
 }
 
 function readStoredPlayerIdentity() {
@@ -1923,8 +1983,8 @@ async function ensurePlayerIdentity() {
     token: issued.token,
   };
   localStorage.setItem(PLAYER_IDENTITY_KEY, JSON.stringify(playerIdentity));
-  activeSaveId = readScopedStorageValue(ACTIVE_SAVE_KEY) || null;
-  activeSlotNumber = Number(readScopedStorageValue(ACTIVE_SLOT_KEY) || String(activeSlotNumber || 1));
+  selectedSaveMode = normalizeSaveMode(readSettingValue(ACTIVE_SAVE_MODE_KEY) || selectedSaveMode);
+  setActiveSaveContext(selectedSaveMode);
   return playerIdentity;
 }
 
@@ -1999,7 +2059,7 @@ async function syncSaveToServer(payload) {
   let res = await fetch(activeSaveId ? `${apiBase}/api/saves/${activeSaveId}` : `${apiBase}/api/saves`, buildRequest());
   if (res.status === 404 && activeSaveId) {
     activeSaveId = null;
-    writeScopedStorageValue(ACTIVE_SAVE_KEY, null);
+    writeSaveContextValue(ACTIVE_SAVE_KEY, state.mode || selectedSaveMode, null);
     res = await fetch(`${apiBase}/api/saves`, buildRequest());
   }
   if (res.status === 401 && playerIdentity?.token) {
@@ -2010,7 +2070,7 @@ async function syncSaveToServer(payload) {
   if (!res.ok) throw new Error(`save failed ${res.status}`);
   const saved = await res.json();
   activeSaveId = saved.id;
-  writeScopedStorageValue(ACTIVE_SAVE_KEY, activeSaveId);
+  writeSaveContextValue(ACTIVE_SAVE_KEY, state.mode || selectedSaveMode, activeSaveId);
 }
 
 async function fetchJson(url, options, { requireIdentity = false } = {}) {
@@ -2324,11 +2384,82 @@ function getEnteredPlayerName() {
   return nameVal || "주인공";
 }
 
+function updateSaveModeTabs() {
+  saveModeSingleBtn.classList.toggle("is-active", selectedSaveMode === "single");
+  saveModeMultiBtn.classList.toggle("is-active", selectedSaveMode === "multi");
+}
+
+function formatSaveCardContent(save, slot, mode) {
+  if (!save) {
+    return `
+      <div class="slot-title">슬롯 ${slot}</div>
+      <div class="slot-meta">${mode === "multi" ? "빈 멀티 슬롯" : "빈 슬롯"}</div>
+    `;
+  }
+
+  return `
+    <div class="slot-title">슬롯 ${slot} · ${save.playerName}</div>
+    <div class="slot-meta">${save.currentMap} (${save.positionX}, ${save.positionY}) · ${save.starter?.name || "파트너 없음"} Lv.${save.starter?.level || "-"}</div>
+    <div class="slot-meta">${mode === "multi" ? "방 입장 시 이 슬롯으로 이어집니다." : "즉시 이어서 시작합니다."}</div>
+    <div class="slot-meta">마지막 저장: ${new Date(save.updatedAt).toLocaleString()}</div>
+  `;
+}
+
+function renderMultiSlotPicker(saves) {
+  const bySlot = new Map(saves.map(save => [save.slotNumber, save]));
+  multiSaveSlotsEl.innerHTML = "";
+
+  for (let slot = 1; slot <= 3; slot++) {
+    const save = bySlot.get(slot);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `slot-mini ${activeSlotNumber === slot ? "is-active" : ""}`;
+    button.innerHTML = `
+      <strong>슬롯 ${slot}</strong>
+      <span>${save ? `${save.playerName} · ${save.starter?.name || "파트너 없음"}` : "새 멀티 진행"}</span>
+    `;
+    button.onclick = async () => {
+      setActiveSaveContext("multi", { slotNumber: slot, saveId: save?.id ?? null });
+      await renderRooms();
+    };
+    multiSaveSlotsEl.appendChild(button);
+  }
+}
+
+function renderMultiSaveSummary(saves) {
+  const selected = saves.find(save => save.slotNumber === activeSlotNumber);
+  multiSaveSummaryEl.innerHTML = selected ? `
+    <strong>현재 멀티 슬롯 ${activeSlotNumber}</strong><br>
+    ${selected.playerName} · ${selected.currentMap} · ${selected.starter?.name || "파트너 없음"} Lv.${selected.starter?.level || "-"}<br>
+    방에 입장하면 이 슬롯 진행을 불러오고, 플레이 중 자동 저장도 같은 슬롯에 이어집니다.
+  ` : `
+    <strong>현재 멀티 슬롯 ${activeSlotNumber}</strong><br>
+    아직 저장된 멀티 진행이 없습니다. 방에 입장하면 새 진행이 시작되고, 이후 같은 슬롯에 저장됩니다.
+  `;
+}
+
+async function prepareMultiplayerSavedState() {
+  setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: activeSaveId });
+  if (!activeSaveId) {
+    return null;
+  }
+
+  try {
+    const detail = await fetchJson(`${apiBase}/api/saves/${activeSaveId}`, undefined, { requireIdentity: true });
+    setActiveSaveContext("multi", { slotNumber: detail.slotNumber, saveId: detail.id });
+    return detail.gameState;
+  } catch (error) {
+    if (parseHttpStatus(error) === 404) {
+      setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: null });
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState = null, roomId = null, roomName = null, wsUrl = null } = {}) {
-  activeSlotNumber = slotNumber;
-  activeSaveId = saveId;
-  writeScopedStorageValue(ACTIVE_SLOT_KEY, String(activeSlotNumber));
-  writeScopedStorageValue(ACTIVE_SAVE_KEY, activeSaveId);
+  setActiveSaveContext(mode, { slotNumber, saveId });
 
   if (savedState) {
     applySavedState(savedState);
@@ -2367,33 +2498,37 @@ function beginGame({ mode = "single", slotNumber = 1, saveId = null, savedState 
   }, 200);
 }
 
-async function renderSaveSlots() {
+async function renderSaveSlots(mode = selectedSaveMode) {
+  setActiveSaveContext(mode);
+  updateSaveModeTabs();
   setMenuPanel(saveMenuPanel);
   setStatus("세이브 슬롯을 불러오는 중...");
   saveSlotsEl.innerHTML = "";
 
   try {
-    const saves = await fetchJson(`${apiBase}/api/saves?mode=single`, undefined, { requireIdentity: true });
+    const saves = await fetchJson(`${apiBase}/api/saves?mode=${selectedSaveMode}`, undefined, { requireIdentity: true });
     const bySlot = new Map(saves.map(save => [save.slotNumber, save]));
     for (let slot = 1; slot <= 3; slot++) {
       const save = bySlot.get(slot);
       const button = document.createElement("button");
       button.className = "slot-card";
       button.type = "button";
-      button.innerHTML = save ? `
-        <div class="slot-title">슬롯 ${slot} · ${save.playerName}</div>
-        <div class="slot-meta">${save.currentMap} (${save.positionX}, ${save.positionY}) · ${save.starter?.name || "파트너 없음"} Lv.${save.starter?.level || "-"}</div>
-        <div class="slot-meta">마지막 저장: ${new Date(save.updatedAt).toLocaleString()}</div>
-      ` : `
-        <div class="slot-title">슬롯 ${slot}</div>
-        <div class="slot-meta">빈 슬롯</div>
-      `;
+      button.innerHTML = formatSaveCardContent(save, slot, selectedSaveMode);
       button.onclick = async () => {
-        activeSlotNumber = slot;
+        setActiveSaveContext(selectedSaveMode, { slotNumber: slot, saveId: save?.id ?? null });
+        if (selectedSaveMode === "multi") {
+          setStatus(save
+            ? `멀티 슬롯 ${slot}을 선택했습니다. 방 목록에서 입장할 방을 고르면 이어서 복구됩니다.`
+            : `멀티 슬롯 ${slot}을 선택했습니다. 방 목록에서 입장하면 새 진행이 시작됩니다.`);
+          await renderRooms();
+          return;
+        }
+
         if (!save) {
           beginGame({ mode: "single", slotNumber: slot });
           return;
         }
+
         const detail = await fetchJson(`${apiBase}/api/saves/${save.id}`, undefined, { requireIdentity: true });
         beginGame({ mode: "single", slotNumber: slot, saveId: detail.id, savedState: detail.gameState });
       };
@@ -2401,25 +2536,38 @@ async function renderSaveSlots() {
     }
     setStatus("");
   } catch {
+    if (selectedSaveMode === "multi") {
+      setStatus("멀티 세이브 목록을 불러오지 못했습니다. 서버 연결을 확인한 뒤 다시 시도하세요.");
+      saveSlotsEl.innerHTML = `<div class="room-card"><div class="room-meta">멀티 저장은 서버 방 입장과 함께 동작하므로, 서버 연결이 필요합니다.</div></div>`;
+      return;
+    }
+
     setStatus("서버 세이브를 불러오지 못했습니다. 로컬 저장으로 이어합니다.");
     const button = document.createElement("button");
     button.className = "slot-card";
     button.type = "button";
     button.innerHTML = `<div class="slot-title">로컬 저장</div><div class="slot-meta">브라우저에 저장된 진행도를 불러옵니다.</div>`;
-      button.onclick = () => {
-        loadGame();
-        beginGame({ mode: state.mode || "single", slotNumber: activeSlotNumber, savedState: { ...state } });
-      };
+    button.onclick = () => {
+      loadGame();
+      beginGame({ mode: "single", slotNumber: activeSlotNumber, savedState: { ...state } });
+    };
     saveSlotsEl.appendChild(button);
   }
 }
 
 async function renderRooms() {
+  setActiveSaveContext("multi", { slotNumber: activeSlotNumber, saveId: activeSaveId });
   setMenuPanel(multiMenuPanel);
-  setStatus("방 목록을 불러오는 중...");
+  updateSaveModeTabs();
+  setStatus("방 목록과 멀티 슬롯을 불러오는 중...");
   roomListEl.innerHTML = "";
   try {
-    const rooms = await fetchJson(`${apiBase}/api/rooms`);
+    const [rooms, saves] = await Promise.all([
+      fetchJson(`${apiBase}/api/rooms`),
+      fetchJson(`${apiBase}/api/saves?mode=multi`, undefined, { requireIdentity: true }),
+    ]);
+    renderMultiSlotPicker(saves);
+    renderMultiSaveSummary(saves);
     rooms.forEach(room => {
       const button = document.createElement("button");
       button.className = "room-card";
@@ -2430,15 +2578,18 @@ async function renderRooms() {
       `;
       button.onclick = async () => {
         try {
+          const savedState = await prepareMultiplayerSavedState();
           const joined = await fetchJson(`${apiBase}/api/rooms/${room.roomId}/join`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ playerName: getEnteredPlayerName() }),
           }, { requireIdentity: true });
-          setStatus(`멀티 방 참가: ${joined.room.roomName}`);
+          setStatus(`멀티 방 참가: ${joined.room.roomName} · 슬롯 ${activeSlotNumber}`);
           beginGame({
             mode: "multi",
-            slotNumber: 1,
+            slotNumber: activeSlotNumber,
+            saveId: activeSaveId,
+            savedState,
             roomId: joined.room.roomId,
             roomName: joined.room.roomName,
             wsUrl: joined.wsUrl,
@@ -2511,8 +2662,10 @@ document.getElementById("single-btn").addEventListener("click", async () => {
 });
 
 document.getElementById("saves-btn").addEventListener("click", renderSaveSlots);
-document.getElementById("multiplayer-btn").addEventListener("click", renderRooms);
+document.getElementById("multiplayer-btn").addEventListener("click", () => renderRooms());
 document.getElementById("admin-btn").addEventListener("click", renderAdminMetrics);
+saveModeSingleBtn.addEventListener("click", () => renderSaveSlots("single"));
+saveModeMultiBtn.addEventListener("click", () => renderSaveSlots("multi"));
 document.getElementById("settings-btn").addEventListener("click", () => {
   setMenuPanel(settingsPanel);
   setStatus("");
