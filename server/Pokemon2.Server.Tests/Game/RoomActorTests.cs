@@ -28,6 +28,21 @@ public sealed class RoomActorTests
     }
 
     [Fact]
+    public async Task Move_IntoBlockedTerrain_RejectsWithWallCollision()
+    {
+        var room = CreateRoom([new Position(2, 1)]);
+        var socket = new CapturingWebSocket();
+        await JoinAsync(room, socket);
+
+        await room.EnqueueAsync(new RoomCommand.Move("p1", Direction.Right, 1, CancellationToken.None));
+
+        var rejected = await socket.WaitForEnvelopeAsync("move_rejected");
+        Assert.Equal("wall_collision", rejected["payload"]?["reason"]?.GetValue<string>());
+        Assert.Equal(1, rejected["payload"]?["serverPosition"]?["x"]?.GetValue<int>());
+        Assert.Equal(1, rejected["payload"]?["serverPosition"]?["y"]?.GetValue<int>());
+    }
+
+    [Fact]
     public async Task ToSummary_IncludesRoomMoveMetrics()
     {
         var room = CreateRoom();
@@ -138,8 +153,11 @@ public sealed class RoomActorTests
     }
 
     private static RoomActor CreateRoom(IBattleResultStore? store = null)
+        => CreateRoom(Array.Empty<Position>(), store);
+
+    private static RoomActor CreateRoom(IEnumerable<Position> blockedTiles, IBattleResultStore? store = null)
     {
-        var map = new GameMap("test-map", "Test Map", 8, 8, Array.Empty<Position>())
+        var map = new GameMap("test-map", "Test Map", 8, 8, blockedTiles)
         {
             SpawnPoint = new Position(1, 1)
         };

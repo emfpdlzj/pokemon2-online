@@ -4,7 +4,7 @@ using System.Text.Json;
 
 public sealed class MapCatalog
 {
-    private const int WallTile = 1;
+    private static readonly HashSet<int> BlockedTileTypes = [1, 4];
 
     private readonly Dictionary<string, GameMap> _maps;
 
@@ -55,7 +55,7 @@ public sealed class MapCatalog
             var row = definition.Tiles[y];
             for (var x = 0; x < row.Count; x++)
             {
-                if (row[x] == WallTile)
+                if (BlockedTileTypes.Contains(row[x]))
                 {
                     yield return new Position(x, y);
                 }
