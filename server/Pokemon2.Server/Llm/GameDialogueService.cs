@@ -1,30 +1,92 @@
 using System.Text.Json;
+using Pokemon2.Server.Infrastructure;
 
 namespace Pokemon2.Server.Llm;
 
 public sealed class GameDialogueService
 {
     private readonly ILlmTextClient _client;
+    private readonly LlmOptions _options;
+    private readonly LlmRequestLimiter _limiter;
+    private readonly ServerMetrics _metrics;
+    private readonly ILogger<GameDialogueService> _logger;
 
-    public GameDialogueService(ILlmTextClient client)
+    public GameDialogueService(
+        ILlmTextClient client,
+        LlmOptions options,
+        LlmRequestLimiter limiter,
+        ServerMetrics metrics,
+        ILogger<GameDialogueService> logger)
     {
         _client = client;
+        _options = options;
+        _limiter = limiter;
+        _metrics = metrics;
+        _logger = logger;
     }
 
-    public bool IsConfigured => _client.IsConfigured;
+    public bool IsConfigured => _options.IsConfigured(LlmOperation.Reply) || _options.IsConfigured(LlmOperation.Choices);
 
-    public async Task<string> GenerateReplyAsync(string? character, string? message, CancellationToken cancellationToken)
+    public async Task<LlmReplyResult> GenerateReplyAsync(string? character, string? message, string rateLimitKey, CancellationToken cancellationToken)
     {
         var normalizedMessage = NormalizeMessage(message);
-        var prompt = ResolveReplyPrompt(character);
-        return await _client.GenerateTextAsync(prompt, normalizedMessage, 120, cancellationToken);
+        var characterKey = ResolveCharacterKey(character);
+        var prompt = ResolveReplyPrompt(characterKey);
+
+        try
+        {
+            if (!_options.IsConfigured(LlmOperation.Reply))
+            {
+                return BuildReplyFallback(characterKey, "not_configured", null);
+            }
+
+            if (!_limiter.TryAcquire($"reply:{rateLimitKey}", out var retryAfter))
+            {
+                throw new LlmRateLimitException(retryAfter);
+            }
+
+            var completion = await _client.GenerateTextAsync(
+                new LlmCompletionRequest(LlmOperation.Reply, prompt, normalizedMessage),
+                cancellationToken);
+            var sanitized = SanitizeCharacterReply(completion.Text, ResolveReplyFallback(characterKey));
+            _metrics.RecordLlmResult(LlmOperation.Reply, false, null, completion.Usage);
+            return new LlmReplyResult(sanitized, "llm", "ok", characterKey, completion.Model, completion.Usage);
+        }
+        catch (Exception ex) when (TryClassifyFailure(ex, out var reason))
+        {
+            _logger.LogWarning(ex, "Falling back reply for {Character} due to {Reason}.", characterKey, reason);
+            return BuildReplyFallback(characterKey, reason, ex);
+        }
     }
 
-    public async Task<string[]> GenerateChoicesAsync(string? message, CancellationToken cancellationToken)
+    public async Task<LlmChoicesResult> GenerateChoicesAsync(string? message, string rateLimitKey, CancellationToken cancellationToken)
     {
         var normalizedMessage = NormalizeMessage(message);
-        var raw = await _client.GenerateTextAsync(ChoicesSystemPrompt, normalizedMessage, 180, cancellationToken);
-        return ParseChoices(raw);
+
+        try
+        {
+            if (!_options.IsConfigured(LlmOperation.Choices))
+            {
+                return BuildChoicesFallback(normalizedMessage, "not_configured", null);
+            }
+
+            if (!_limiter.TryAcquire($"choices:{rateLimitKey}", out var retryAfter))
+            {
+                throw new LlmRateLimitException(retryAfter);
+            }
+
+            var completion = await _client.GenerateTextAsync(
+                new LlmCompletionRequest(LlmOperation.Choices, ChoicesSystemPrompt, normalizedMessage),
+                cancellationToken);
+            var choices = ParseChoices(completion.Text);
+            _metrics.RecordLlmResult(LlmOperation.Choices, false, null, completion.Usage);
+            return new LlmChoicesResult(choices, "llm", "ok", completion.Model, completion.Usage);
+        }
+        catch (Exception ex) when (TryClassifyFailure(ex, out var reason))
+        {
+            _logger.LogWarning(ex, "Falling back choices due to {Reason}.", reason);
+            return BuildChoicesFallback(normalizedMessage, reason, ex);
+        }
     }
 
     internal static string[] ParseChoices(string raw)
@@ -66,11 +128,100 @@ public sealed class GameDialogueService
         return normalized;
     }
 
-    private static string ResolveReplyPrompt(string? character)
+    private static string ResolveReplyPrompt(string character)
     {
-        return string.Equals(character?.Trim(), "binna", StringComparison.OrdinalIgnoreCase)
+        return string.Equals(character, "binna", StringComparison.OrdinalIgnoreCase)
             ? BinnaSystemPrompt
             : RivalSystemPrompt;
+    }
+
+    private static string ResolveCharacterKey(string? character)
+    {
+        return string.Equals(character?.Trim(), "binna", StringComparison.OrdinalIgnoreCase)
+            ? "binna"
+            : "rival";
+    }
+
+    private static string[] BuildChoicesFallbackValues(string message)
+    {
+        if (message.Contains("조심", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("위험", StringComparison.OrdinalIgnoreCase))
+        {
+            return new[] { "조심할게.", "뭐가 있어?", "넌 괜찮아?" };
+        }
+
+        if (message.Contains("박사", StringComparison.OrdinalIgnoreCase))
+        {
+            return new[] { "박사님 덕분이야.", "더 배우고 싶어.", "같이 가볼래?" };
+        }
+
+        return new[] { "좋은 생각이야.", "나도 궁금해.", "같이 가보자!" };
+    }
+
+    private static string ResolveReplyFallback(string character)
+    {
+        return string.Equals(character, "binna", StringComparison.OrdinalIgnoreCase)
+            ? "또 얘기하자!"
+            : "나중에 다시 말 걸어줘!";
+    }
+
+    private LlmReplyResult BuildReplyFallback(string character, string reason, Exception? ex)
+    {
+        _metrics.RecordLlmResult(LlmOperation.Reply, true, reason, null);
+        return new LlmReplyResult(
+            ResolveReplyFallback(character),
+            "fallback",
+            reason,
+            character,
+            _options.Resolve(LlmOperation.Reply).Model,
+            new LlmCompletionUsage(0, 0, 0, 0m));
+    }
+
+    private LlmChoicesResult BuildChoicesFallback(string message, string reason, Exception? ex)
+    {
+        _metrics.RecordLlmResult(LlmOperation.Choices, true, reason, null);
+        return new LlmChoicesResult(
+            BuildChoicesFallbackValues(message),
+            "fallback",
+            reason,
+            _options.Resolve(LlmOperation.Choices).Model,
+            new LlmCompletionUsage(0, 0, 0, 0m));
+    }
+
+    private static bool TryClassifyFailure(Exception ex, out string reason)
+    {
+        reason = ex switch
+        {
+            LlmRateLimitException => "rate_limited",
+            LlmInvalidResponseException => "invalid_response",
+            InvalidOperationException => "not_configured",
+            HttpRequestException => "provider_error",
+            JsonException => "invalid_response",
+            _ => "provider_error"
+        };
+
+        return ex is not ArgumentException;
+    }
+
+    private static string SanitizeCharacterReply(string reply, string fallback)
+    {
+        var text = string.Join(' ', reply.Split(default(string[]), StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (text.Length == 0 || text.Length > 60)
+        {
+            return fallback;
+        }
+
+        if (text.Any(character =>
+                !(character is >= '\u3131' and <= '\u318E' or >= '\uAC00' and <= '\uD7A3') &&
+                !char.IsLetterOrDigit(character) &&
+                !char.IsWhiteSpace(character) &&
+                character is not '?' and not '!' and not '.' and not ',' and not '~' and not '"' and not '\'' and not '(' and not ')' and not ':' and not '-'))
+        {
+            return fallback;
+        }
+
+        var sentenceCount = text.Count(character => character is '?' or '!' or '.');
+        return sentenceCount > 3 ? fallback : text;
     }
 
     private const string RivalSystemPrompt = """
@@ -123,3 +274,18 @@ public sealed class GameDialogueService
 {"choices":["내 파트너가 더 강해!","박사님한테 배웠거든.","같이 강해지자!"]}
 """;
 }
+
+public sealed record LlmReplyResult(
+    string Reply,
+    string Source,
+    string Status,
+    string Character,
+    string Model,
+    LlmCompletionUsage Usage);
+
+public sealed record LlmChoicesResult(
+    string[] Choices,
+    string Source,
+    string Status,
+    string Model,
+    LlmCompletionUsage Usage);

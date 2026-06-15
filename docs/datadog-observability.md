@@ -37,6 +37,17 @@ Global metrics:
 - `pokemon2.command.latency.max_ms`
 - `pokemon2.tick.delay.avg_ms`
 - `pokemon2.tick.delay.max_ms`
+- `pokemon2.llm.reply.requests`
+- `pokemon2.llm.reply.success`
+- `pokemon2.llm.reply.fallback`
+- `pokemon2.llm.choices.requests`
+- `pokemon2.llm.choices.success`
+- `pokemon2.llm.choices.fallback`
+- `pokemon2.llm.failures` tagged by `reason`
+- `pokemon2.llm.tokens.prompt_total`
+- `pokemon2.llm.tokens.completion_total`
+- `pokemon2.llm.tokens.total`
+- `pokemon2.llm.cost.estimated_usd_total`
 
 Room-level metrics are tagged by `room_id` and `map_id`:
 
@@ -63,6 +74,7 @@ Recommended dashboard panels:
 - Average and max command latency.
 - Average and max tick delay.
 - Per-room player count and rejected moves split by `room_id`.
+- LLM 요청량, fallback 비율, `reason`별 실패, 누적 토큰/예상 비용.
 
 ## Load Test Flow
 
