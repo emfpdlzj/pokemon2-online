@@ -61,6 +61,22 @@
 
 공통 값이 있으면 `reply`, `choices`는 이를 기본값으로 사용하고, 엔드포인트별 값이 있으면 override 한다.
 
+## 빠른 점검 절차
+
+1. `GET /api/health`로 서버가 떠 있고 LLM 설정이 잡혔는지 먼저 확인한다.
+2. `llm.replyConfigured`, `llm.choicesConfigured`가 둘 다 `true`인지 본다.
+3. 둘 중 하나라도 `false`면 `server/.env` 또는 운영 시크릿의 `POKEMON2_LLM_API_KEY`, `POKEMON2_LLM_API_URL`, `POKEMON2_LLM_MODEL` 계열 값을 먼저 점검한다.
+4. 설정이 맞는데도 응답이 항상 기본 문구로 떨어지면 `/api/llm/reply`, `/api/llm/choices` 응답의 `source`, `status`, `model` 필드를 확인한다.
+
+예시:
+
+```bash
+curl -s http://localhost:5140/api/health
+curl -s -X POST http://localhost:5140/api/llm/reply \
+  -H 'Content-Type: application/json' \
+  -d '{"character":"rival","message":"안녕"}'
+```
+
 ## 호출 제한과 추적
 
 - 서버는 분당 `POKEMON2_LLM_RATE_LIMIT_PER_MINUTE` 기준으로 `reply`, `choices` 요청을 각각 제한한다.
@@ -80,3 +96,4 @@
 - `choices`: 입력 맥락에 맞춘 3개 기본 선택지
 
 클라이언트 네트워크 오류 시에도 같은 fallback 문구를 사용해 서버 장애와 provider 장애 모두에서 UX 차이를 줄인다.
+서버는 fallback이 발생해도 `source=fallback` 과 `status=not_configured|provider_error|invalid_response|rate_limited`를 응답에 남겨 원인을 구분한다.
