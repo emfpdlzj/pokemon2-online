@@ -40,6 +40,7 @@ builder.Services.AddSingleton<ServerMetrics>();
 builder.Services.AddSingleton(DogStatsdOptions.FromEnvironment(builder.Configuration));
 builder.Services.AddHostedService<DatadogMetricsPublisher>();
 builder.Services.AddSingleton<PlayerIdentityService>();
+builder.Services.AddSingleton<AdminAccessService>();
 builder.Services.AddSingleton<IBattleResultStore, EfBattleResultStore>();
 builder.Services.AddSingleton<RoomManager>();
 builder.Services.AddSingleton<WebSocketGameEndpoint>();
@@ -246,8 +247,13 @@ app.MapDelete("/api/saves/{saveId:guid}", async (HttpContext context, GameDbCont
     return deleted == 0 ? Results.NotFound(new { message = "Save not found." }) : Results.NoContent();
 });
 
-app.MapGet("/api/admin/metrics", (RoomManager rooms, ServerMetrics metrics) =>
+app.MapGet("/api/admin/metrics", (HttpContext context, RoomManager rooms, ServerMetrics metrics, AdminAccessService adminAccess) =>
 {
+    if (!adminAccess.IsAuthorized(context))
+    {
+        return Results.Json(new { message = "Admin access required." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
     return Results.Ok(new
     {
         rooms = rooms.ListRooms(),
@@ -284,9 +290,64 @@ static async Task EnsureDatabaseAsync(WebApplication app)
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
-        await db.Database.EnsureCreatedAsync();
-        await db.Database.ExecuteSqlRawAsync("""
+        await BaselinePreMigrationSchemaAsync(db, app.Logger);
+        await db.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "PostgreSQL database is not ready. Save APIs require a configured database.");
+    }
+}
+
+static async Task BaselinePreMigrationSchemaAsync(GameDbContext db, ILogger logger)
+{
+    const string initialMigrationId = "20260615170000_InitialSchema";
+    const string productVersion = "10.0.1";
+
+    var connection = db.Database.GetDbConnection();
+    await connection.OpenAsync();
+
+    try
+    {
+        var historyExists = await TableExistsAsync(connection, "__EFMigrationsHistory");
+        var playerSavesExists = await TableExistsAsync(connection, "player_saves");
+        var battleResultsExists = await TableExistsAsync(connection, "battle_results");
+        if (historyExists || (!playerSavesExists && !battleResultsExists))
+        {
+            return;
+        }
+
+        await db.Database.ExecuteSqlRawAsync($$"""
+            CREATE TABLE IF NOT EXISTS player_saves (
+                id uuid NOT NULL,
+                user_id character varying(80),
+                slot_number integer NOT NULL,
+                mode character varying(24) NOT NULL,
+                player_name character varying(40) NOT NULL,
+                current_map character varying(64) NOT NULL,
+                position_x integer NOT NULL,
+                position_y integer NOT NULL,
+                starter_id character varying(32),
+                starter_name character varying(40),
+                starter_level integer,
+                starter_current_hp integer,
+                play_time_seconds bigint NOT NULL DEFAULT 0,
+                events_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+                game_state_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+                created_at timestamp with time zone NOT NULL DEFAULT NOW(),
+                updated_at timestamp with time zone NOT NULL DEFAULT NOW(),
+                CONSTRAINT "PK_player_saves" PRIMARY KEY (id)
+            );
             ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS user_id character varying(80);
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS starter_id character varying(32);
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS starter_name character varying(40);
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS starter_level integer;
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS starter_current_hp integer;
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS play_time_seconds bigint NOT NULL DEFAULT 0;
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS events_json jsonb NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS game_state_json jsonb NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS created_at timestamp with time zone NOT NULL DEFAULT NOW();
+            ALTER TABLE player_saves ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone NOT NULL DEFAULT NOW();
             UPDATE player_saves
             SET user_id = 'legacy-default'
             WHERE user_id IS NULL OR btrim(user_id) = '';
@@ -295,12 +356,50 @@ static async Task EnsureDatabaseAsync(WebApplication app)
             DROP INDEX IF EXISTS ix_player_saves_mode_slot_number;
             CREATE UNIQUE INDEX IF NOT EXISTS ix_player_saves_user_mode_slot_number
             ON player_saves (user_id, mode, slot_number);
+
+            CREATE TABLE IF NOT EXISTS battle_results (
+                id uuid NOT NULL,
+                room_id character varying(40) NOT NULL,
+                player_id character varying(64) NOT NULL,
+                player_name character varying(40) NOT NULL,
+                monster_id character varying(64) NOT NULL,
+                monster_name character varying(40) NOT NULL,
+                won boolean NOT NULL,
+                server_tick bigint NOT NULL,
+                created_at timestamp with time zone NOT NULL DEFAULT NOW(),
+                CONSTRAINT "PK_battle_results" PRIMARY KEY (id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_battle_results_room_id_created_at
+            ON battle_results (room_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+                "MigrationId" character varying(150) NOT NULL,
+                "ProductVersion" character varying(32) NOT NULL,
+                CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+            );
+            INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+            VALUES ('{{initialMigrationId}}', '{{productVersion}}')
+            ON CONFLICT ("MigrationId") DO NOTHING;
             """);
+
+        logger.LogInformation("Baselined existing PostgreSQL schema to migration {MigrationId}.", initialMigrationId);
     }
-    catch (Exception ex)
+    finally
     {
-        app.Logger.LogWarning(ex, "PostgreSQL database is not ready. Save APIs require a configured database.");
+        await connection.CloseAsync();
     }
+}
+
+static async Task<bool> TableExistsAsync(System.Data.Common.DbConnection connection, string tableName)
+{
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT to_regclass(@tableName) IS NOT NULL;";
+    var parameter = command.CreateParameter();
+    parameter.ParameterName = "tableName";
+    parameter.Value = tableName;
+    command.Parameters.Add(parameter);
+    var result = await command.ExecuteScalarAsync();
+    return result is true || result is bool boolean && boolean;
 }
 
 static string NormalizePostgresConnectionString(string connectionString)

@@ -21,6 +21,18 @@ export POKEMON2_HTTP_TARGET=http://localhost:5199
 export POKEMON2_WS_TARGET=ws://localhost:5199
 ```
 
+The Artillery scenarios now follow the production join flow automatically:
+
+- `GET /api/player/identity`
+- `POST /api/rooms/{roomId}/join`
+- connect to the returned `wsUrl`
+
+If `/api/admin/metrics` is protected, also set:
+
+```bash
+export POKEMON2_ADMIN_TOKEN=replace-with-admin-token
+```
+
 ## Room Scale Test
 
 Creates one room per virtual user, connects over WebSocket, and sends movement packets at mixed fast/normal/slow client paces.
@@ -29,7 +41,7 @@ Creates one room per virtual user, connects over WebSocket, and sends movement p
 npm run load:artillery:rooms
 ```
 
-Use this for room actor count, WebSocket message throughput, and command queue latency from `GET /api/admin/metrics`.
+Use this for room actor count, WebSocket message throughput, and command queue latency from `GET /api/admin/metrics`. Without an admin token, the run still works but the metrics summary may return `401 Unauthorized`.
 
 ## Hot Room Test
 
@@ -46,4 +58,4 @@ export POKEMON2_ROOM_ID=room-abc12345
 npm run load:artillery:hot-room
 ```
 
-Use this as a quick open-source smoke test for shared-room WebSocket traffic. For collision result counts and observed RTT, run the C# load test because it parses `player_moved` and `move_rejected` payloads directly.
+Use this as a quick smoke test for shared-room WebSocket traffic. For collision result counts and observed RTT, run the C# load test because it parses `player_moved` and `move_rejected` payloads directly.
