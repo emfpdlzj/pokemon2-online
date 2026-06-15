@@ -7,9 +7,6 @@ const outputPath = join(rootDir, "client", "env.js");
 const envPaths = [join(rootDir, ".env"), join(rootDir, "client", ".env")];
 const clientKeys = [
   "POKEMON2_API_BASE",
-  "POKEMON2_LLM_API_KEY",
-  "POKEMON2_LLM_API_URL",
-  "POKEMON2_LLM_MODEL",
 ];
 
 const values = {};

@@ -4,86 +4,16 @@ export function createGameRuntime({ maps, dialogues, env = window.POKEMON2_ENV |
 const MAPS = maps;
 const DIALOGUES = dialogues;
 
-// ============================================================
-//  LLM 설정 (여기만 수정하면 다른 API로 교체 가능)
-// ============================================================
 const CLIENT_ENV = env;
-const API_KEY    = CLIENT_ENV.POKEMON2_LLM_API_KEY || "";
-const API_URL    = CLIENT_ENV.POKEMON2_LLM_API_URL || "";
-const MODEL_NAME = CLIENT_ENV.POKEMON2_LLM_MODEL || "";
 
-const RIVAL_SYSTEM_PROMPT = `
-너는 포켓몬풍 RPG 게임 속 플레이어의 소꿉친구 '리벨'이야.
-성격: 밝고 자신감 있고 살짝 경쟁심 있음.
-말투: 짧고 직접적. 반말. 항상 1~2문장으로만 대답.
-제약:
-- 첫 번째 마을과 연구소 주변 이야기만 알고 있음
-- 미래 스토리 스포일러 금지
-- 현대 인터넷 용어 사용 금지
-- 자신이 AI라고 말하면 안 됨
-- 게임 세계관 밖 이야기 금지
-응답 예시: "흥, 나보다 먼저 강해질 생각은 하지 마!", "앞쪽 길은 조심해. 괜히 겁먹은 건 아니거든!"
-`.trim();
-
-const BINNA_SYSTEM_PROMPT = `
-너는 포켓몬풍 RPG 게임 속 플레이어의 소꿉친구 '빛나'야.
-성격: 다정하고 활발하며 응원해 주는 편이야.
-말투: 짧고 자연스러운 반말. 항상 1~2문장으로만 대답.
-제약:
-- 첫 번째 마을, 박사 연구소, 1번 도로, 나팔꽃마을 초반 구간만 알고 있음
-- 미래 스토리 스포일러 금지
-- 현대 인터넷 용어 사용 금지
-- 자신이 AI라고 말하면 안 됨
-- 게임 세계관 밖 이야기 금지
-응답 예시: "와, 벌써 여기까지 왔네! 역시 너답다.", "또 만났네! 같이 마을도 둘러볼래?"
-`.trim();
-
-// 선택지 생성용 프롬프트
-const CHOICES_SYSTEM_PROMPT = `
-너는 포켓몬풍 RPG 게임의 대화 선택지 생성기야.
-플레이어는 막 스타팅 몬스터를 받고 모험을 시작한 초보 트레이너야.
-배경: 시작 마을, 박사 연구소, 1번 도로, 나팔꽃마을 초반 구간.
-
-상대 캐릭터의 대사를 받으면, 플레이어가 할 수 있는 자연스러운 짧은 대답 3개를 생성해.
-선택지는 반드시 아래 조건을 따라야 해:
-- 상대 대사에 직접 반응해야 함. 뜬금없는 주제 전환 금지
-- 상대가 질문하면 답하거나 되묻는 선택지를 포함
-- 상대가 도발해도 플레이어는 시비 걸거나 공격적으로 말하지 않음
-- 플레이어 선택지는 친근함 / 침착함 / 호기심 위주로 생성
-- 직전 대사에 없는 정보(체육관, 전설의 몬스터, 먼 미래 지역 등) 추가 금지
-- 포켓몬 세계관 줄거리와 연관 (예: 스타팅 몬스터, 모험, 마을, 트레이너 배틀, 박사)
-- 각각 다른 감정/태도 (예: 자신감 있는 / 궁금한 / 도전적인)
-- 10자 이내, 반말, 게임 캐릭터 말투
-- 현대 인터넷 용어 금지
-
-반드시 아래 JSON 형식으로만 응답해. 다른 텍스트 없이:
-{"choices":["선택지1","선택지2","선택지3"]}
-
-예시:
-{"choices":["내 파트너가 더 강해!","박사님한테 배웠거든.","같이 강해지자!"]}
-`.trim();
-
-// ── LLM 요청 함수 (Gemini API) ──
-async function callLLMWithPrompt(systemPrompt, userMessage) {
-  if (!API_KEY || !API_URL || !MODEL_NAME) throw new Error("LLM config is not configured.");
-
-  const url = `${API_URL}/${MODEL_NAME}:generateContent?key=${API_KEY}`;
-  const res = await fetch(url, {
+async function requestLlmJson(path, payload) {
+  const res = await fetch(`${apiBase}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userMessage }] }],
-      generationConfig: { maxOutputTokens: 80 },
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
-}
-
-// ── 응답 파싱 함수 (Gemini) ──
-function parseLLMResponse(data) {
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
 }
 
 const FALLBACK_REPLIES = [
@@ -104,9 +34,9 @@ function sanitizeCharacterReply(reply, fallback) {
 
 async function getRivalReply(userMessage) {
   try {
-    const data = await callLLMWithPrompt(RIVAL_SYSTEM_PROMPT, userMessage);
+    const data = await requestLlmJson("/api/llm/reply", { character: "rival", message: userMessage });
     return sanitizeCharacterReply(
-      parseLLMResponse(data),
+      data?.reply,
       FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)]
     );
   } catch {
@@ -116,8 +46,8 @@ async function getRivalReply(userMessage) {
 
 async function getBinnaReply(userMessage) {
   try {
-    const data = await callLLMWithPrompt(BINNA_SYSTEM_PROMPT, userMessage);
-    return sanitizeCharacterReply(parseLLMResponse(data), "또 얘기하자!");
+    const data = await requestLlmJson("/api/llm/reply", { character: "binna", message: userMessage });
+    return sanitizeCharacterReply(data?.reply, "또 얘기하자!");
   } catch {
     return "또 얘기하자!";
   }
@@ -126,23 +56,9 @@ async function getBinnaReply(userMessage) {
 // 선택지 3개 생성
 async function getRivalChoices(rivalMessage) {
   try {
-    if (!API_KEY || !API_URL || !MODEL_NAME) throw new Error("LLM config is not configured.");
-
-    const url = `${API_URL}/${MODEL_NAME}:generateContent?key=${API_KEY}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: CHOICES_SYSTEM_PROMPT }] },
-        contents: [{ role: "user", parts: [{ text: rivalMessage }] }],
-        generationConfig: { maxOutputTokens: 100 },
-      }),
-    });
-    const data = await res.json();
-    const raw = parseLLMResponse(data) || "";
-    const json = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    if (Array.isArray(json.choices)) {
-      const cleaned = sanitizeRivalChoices(json.choices, rivalMessage);
+    const data = await requestLlmJson("/api/llm/choices", { message: rivalMessage });
+    if (Array.isArray(data?.choices)) {
+      const cleaned = sanitizeRivalChoices(data.choices, rivalMessage);
       if (cleaned.length === 3) return cleaned;
     }
   } catch {}

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Pokemon2.Server.Data;
 using Pokemon2.Server.Game;
 using Pokemon2.Server.Infrastructure;
+using Pokemon2.Server.Llm;
 using Pokemon2.Server.Networking;
 
 DotEnv.LoadForServer();
@@ -26,6 +27,12 @@ builder.Services.AddDbContext<GameDbContext>(options =>
 
     options.UseNpgsql(NormalizePostgresConnectionString(connectionString));
 });
+builder.Services.AddSingleton(LlmOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddHttpClient<ILlmTextClient, OpenAiCompatibleLlmClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddSingleton<GameDialogueService>();
 builder.Services.AddSingleton<MapCatalog>();
 builder.Services.AddSingleton<ServerMetrics>();
 builder.Services.AddSingleton(DogStatsdOptions.FromEnvironment(builder.Configuration));
@@ -89,6 +96,50 @@ app.MapPost("/api/sessions/single", () =>
         mode = "single",
         serverTime = DateTimeOffset.UtcNow
     });
+});
+
+app.MapPost("/api/llm/reply", async (GameDialogueService llm, LlmReplyRequest request, CancellationToken cancellationToken) =>
+{
+    if (!llm.IsConfigured)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    try
+    {
+        var reply = await llm.GenerateReplyAsync(request.Character, request.Message, cancellationToken);
+        return Results.Ok(new LlmReplyResponse(reply));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (Exception)
+    {
+        return Results.StatusCode(StatusCodes.Status502BadGateway);
+    }
+});
+
+app.MapPost("/api/llm/choices", async (GameDialogueService llm, LlmChoicesRequest request, CancellationToken cancellationToken) =>
+{
+    if (!llm.IsConfigured)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    try
+    {
+        var choices = await llm.GenerateChoicesAsync(request.Message, cancellationToken);
+        return Results.Ok(new LlmChoicesResponse(choices));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (Exception)
+    {
+        return Results.StatusCode(StatusCodes.Status502BadGateway);
+    }
 });
 
 app.MapGet("/api/saves", async (GameDbContext db, string? mode, CancellationToken cancellationToken) =>
